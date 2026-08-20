@@ -57,11 +57,6 @@
             </template>
             <div v-if="submitting" class="message agent-message continuation"><div class="bubble typing-bubble"><span>{{ liveProgress.label }}</span><i></i><i></i><i></i></div></div>
 
-            <div v-if="!demoMode && !userInput.trim() && !submitting" class="workspace-empty">
-              <div class="empty-core"><img src="/assets/spatial-agent-core.png" alt="AI Agent 空间核心" /></div>
-              <h2>用一段文字，开始构建能力证据图谱</h2>
-              <p>建议写明：已经掌握什么、做过什么实践、哪些地方还需要补强。</p>
-            </div>
           </div>
 
           <div class="composer" :class="{ focused: composerFocused, 'followup-composer': followupPending || (demoMode && !demoReplySent) }">
@@ -372,6 +367,7 @@ onBeforeUnmount(() => {
 .review-heading { margin-bottom: 14px; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(360px, 1fr); gap: 22px; align-items: stretch; }
 .review-workspace {
+  position: relative;
   min-height: 628px;
   padding: 20px;
   display: flex;
@@ -391,7 +387,7 @@ onBeforeUnmount(() => {
 .job-picker { display: flex; align-items: center; gap: 7px; }
 .job-picker label { font-size: 11px; color: var(--ink-soft); }
 .job-picker select { max-width: 190px; border: 1px solid var(--line); border-radius: 10px; padding: 7px 25px 7px 10px; color: var(--ink); background: rgba(255,255,255,.69); outline: none; font-size: 12px; }
-.conversation { z-index: 1; min-height: 334px; flex: 1; position: relative; padding: 22px 9px 14px; display: flex; flex-direction: column; gap: 15px; }
+.conversation { z-index: 1; min-width: 0; min-height: 334px; flex: 1; position: relative; overflow-x: hidden; padding: 22px 9px 14px; display: flex; flex-direction: column; gap: 15px; }
 .message { display: flex; gap: 10px; align-items: flex-start; max-width: 82%; }
 .message.user-message { align-self: flex-end; justify-content: flex-end; }
 .message.continuation { padding-left: 41px; }
@@ -549,8 +545,9 @@ onBeforeUnmount(() => {
   .review-heading { margin-bottom: 24px; }
   .review-workspace { min-height: 480px; }
   .review-inspector {
-    min-height: 640px;
-    margin-top: -170px;
+    min-width: 0;
+    min-height: 0;
+    margin-top: 0;
     padding: 18px 21px 17px;
   }
   .review-inspector .inspector-head { display: none; }
@@ -606,8 +603,9 @@ onBeforeUnmount(() => {
   .review-page .send-button { min-width: 124px; height: 44px; border-radius: 14px; gap: 8px; font-size: 13px; }
   .review-page .send-button svg { width: 16px; }
   .review-page .review-inspector {
-    min-height: 760px;
-    margin-top: -112px;
+    min-width: 0;
+    min-height: 0;
+    margin-top: 0;
     padding: 28px;
     border-radius: 30px;
   }
@@ -695,6 +693,6 @@ onBeforeUnmount(() => {
 .progress-expand svg.open { transform: rotate(180deg); }
 .quality-title { margin-bottom: 16px; color: var(--ink); font-size: 16px; font-weight: 800; }
 .quality-title svg { width: 19px; }
-@media (min-width: 1061px) { .review-page .review-inspector { min-height: 610px; margin-top: -80px; } .review-page .quality-title { margin-bottom: 20px; font-size: 18px; } .review-page .composer-hint { font-size: 12px; } .review-page .job-trigger { min-width: 258px; min-height: 44px; border-radius: 13px; } .review-page .job-trigger b { font-size: 14px; } }
+@media (min-width: 1061px) { .review-page .review-inspector { min-width: 0; min-height: 0; margin-top: 0; align-self: stretch; } .review-page .quality-title { margin-bottom: 20px; font-size: 18px; } .review-page .composer-hint { font-size: 12px; } .review-page .job-trigger { min-width: 258px; min-height: 44px; border-radius: 13px; } .review-page .job-trigger b { font-size: 14px; } }
 @media (max-width: 680px) { .review-page { padding-top: 22px; } .job-picker { width: 100%; justify-content: space-between; } .job-trigger { flex: 1; min-width: 0; } .job-menu { left: 0; right: auto; } .composer-hint { display: none; } .target-refresh { min-height: 32px; padding-inline: 10px; } }
 </style>
