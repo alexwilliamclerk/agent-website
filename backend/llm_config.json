@@ -1,0 +1,7 @@
+{
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-v4-flash",
+  "api_key": "",
+  "temperature": 0.7,
+  "trust_env": false
+}

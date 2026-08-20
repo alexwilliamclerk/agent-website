@@ -1,0 +1,388 @@
+[
+  {
+    "eval_id": "eval-001",
+    "career_id": "java_backend_engineer",
+    "query": "面试官问我关于[dedication]\n== Dedicatio的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-600e51e1c769"
+  },
+  {
+    "eval_id": "eval-002",
+    "career_id": "java_backend_engineer",
+    "query": "在实际项目中，def fail(\n        message的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "java.network.protocol",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-b111a4ebcc6e"
+  },
+  {
+    "eval_id": "eval-003",
+    "career_id": "java_backend_engineer",
+    "query": "请详细解释一下: |\n|  LEFT() |  左边的字符 |，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "java.database.mysql_index",
+      "java.framework.mybatis"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-b4080720bf11"
+  },
+  {
+    "eval_id": "eval-004",
+    "career_id": "java_backend_engineer",
+    "query": "如果被问到## 五、Paxos\n\n用于达成共识性问题，即对多，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "java.network.protocol"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-48faf5aa3660"
+  },
+  {
+    "eval_id": "eval-005",
+    "career_id": "java_backend_engineer",
+    "query": "面试官问我关于```java\npublic class Futu的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "java.concurrent.thread",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-4b40b0355532"
+  },
+  {
+    "eval_id": "eval-006",
+    "career_id": "java_backend_engineer",
+    "query": "在实际项目中，### 3. 好友关系的连通分量数目\n\n547\\.的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "java.network.protocol",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-67a58dd3d5f1"
+  },
+  {
+    "eval_id": "eval-007",
+    "career_id": "java_backend_engineer",
+    "query": "请详细解释一下## 题目描述\n\n一只青蛙一次可以跳上 1 级台阶，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "java.network.protocol"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-82871f8f9cc2"
+  },
+  {
+    "eval_id": "eval-008",
+    "career_id": "java_backend_engineer",
+    "query": "如果被问到#### Ⅱ 饿汉式-线程安全\n\n线程不安全问题主，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "java.concurrent.thread",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-f61a5adb7ebd"
+  },
+  {
+    "eval_id": "eval-009",
+    "career_id": "java_backend_engineer",
+    "query": "面试官问我关于-\n\n**Note:** While we hav的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-d8aaadd5f4a1"
+  },
+  {
+    "eval_id": "eval-010",
+    "career_id": "java_backend_engineer",
+    "query": "在实际项目中，-\n\nSee also <<227>>.\n\n[#1的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-07bb33fbd7f8"
+  },
+  {
+    "eval_id": "eval-011",
+    "career_id": "java_backend_engineer",
+    "query": "请详细解释一下--\n<permission> ::= <stan，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "java.concurrent.thread",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-4b1f1e6e932e"
+  },
+  {
+    "eval_id": "eval-012",
+    "career_id": "java_backend_engineer",
+    "query": "如果被问到-\n$ git prune --expire no，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "java.tools.git"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-483b94063c4b"
+  },
+  {
+    "eval_id": "eval-013",
+    "career_id": "java_backend_engineer",
+    "query": "面试官问我关于One thing to notice is th的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "java.tools.git",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-23e5ea34c710"
+  },
+  {
+    "eval_id": "eval-014",
+    "career_id": "java_backend_engineer",
+    "query": "在实际项目中，-\n\nThe resulting archive的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "java.tools.git",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-80d9c38f2902"
+  },
+  {
+    "eval_id": "eval-015",
+    "career_id": "java_backend_engineer",
+    "query": "请详细解释一下[[_bundling]]\n=== Bundlin，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "java.framework.mybatis",
+      "java.tools.git",
+      "java.network.protocol",
+      "java.base.core_skills"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-38a53ed5a2d3"
+  },
+  {
+    "eval_id": "eval-016",
+    "career_id": "java_backend_engineer",
+    "query": "如果被问到-\n$ git show d921970^\ncom，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "java.tools.git"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-44303684e20a"
+  },
+  {
+    "eval_id": "eval-017",
+    "career_id": "java_backend_engineer",
+    "query": "面试官问我关于-\n$ git submodule update的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "java.tools.git"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-68e2a8f9462a"
+  },
+  {
+    "eval_id": "eval-018",
+    "career_id": "java_backend_engineer",
+    "query": "在实际项目中，-\n\nNo problems occur; as的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "java.tools.git"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-c2f8b78d0dfe"
+  },
+  {
+    "eval_id": "eval-019",
+    "career_id": "java_backend_engineer",
+    "query": "请详细解释一下-\n\nThat's all.\nThe `post-，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "java.tools.git",
+      "java.network.protocol"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-d4ced6a31f86"
+  },
+  {
+    "eval_id": "eval-020",
+    "career_id": "java_backend_engineer",
+    "query": "如果被问到As you edit files, Git se，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "java.tools.git"
+    ],
+    "target_source_chunk_id": "java_backend_engineer-chunk-fd82c198c298"
+  },
+  {
+    "eval_id": "eval-021",
+    "career_id": "frontend_engineer",
+    "query": "面试官问我关于## Features\n\n![1584258151的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "frontend.network.http"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-153057f81d60"
+  },
+  {
+    "eval_id": "eval-022",
+    "career_id": "frontend_engineer",
+    "query": "在实际项目中，#### 205、[【动画进阶】神奇的 3D 卡片的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "frontend.css.layout",
+      "frontend.network.http"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-d4b8ffebfd1d"
+  },
+  {
+    "eval_id": "eval-023",
+    "career_id": "frontend_engineer",
+    "query": "请详细解释一下## V 4.0.9\n- html rendere，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "frontend.base.core_skills"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-749ce4c5099b"
+  },
+  {
+    "eval_id": "eval-024",
+    "career_id": "frontend_engineer",
+    "query": "如果被问到### Package.json\n\nEnsure，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "frontend.react.core",
+      "frontend.javascript.es_module"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-8b2e0ac4ddb8"
+  },
+  {
+    "eval_id": "eval-025",
+    "career_id": "frontend_engineer",
+    "query": "面试官问我关于### 资源优先级与加载顺序\n\n现代浏览器有一个内的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "frontend.javascript.es_module",
+      "frontend.base.core_skills"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-d82306c0a7f6"
+  },
+  {
+    "eval_id": "eval-026",
+    "career_id": "frontend_engineer",
+    "query": "在实际项目中，#### 1. Cookie窃取与会话劫持\n\n最常的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "frontend.javascript.es_module",
+      "frontend.network.http"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-1ca4a25976ca"
+  },
+  {
+    "eval_id": "eval-027",
+    "career_id": "frontend_engineer",
+    "query": "请详细解释一下```javascript\nfunction ca，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "frontend.javascript.es_module",
+      "frontend.build.tools"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-bc6219e60f31"
+  },
+  {
+    "eval_id": "eval-028",
+    "career_id": "frontend_engineer",
+    "query": "如果被问到## 添加CORS支持\n\n要允许跨域请求，你需要在，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "frontend.javascript.es_module",
+      "frontend.network.http"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-e89607056fe4"
+  },
+  {
+    "eval_id": "eval-029",
+    "career_id": "frontend_engineer",
+    "query": "面试官问我关于## 引言\n\n你是否曾经好奇过，为什么 JavaS的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "frontend.javascript.es_module"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-ae39d036ba4e"
+  },
+  {
+    "eval_id": "eval-030",
+    "career_id": "frontend_engineer",
+    "query": "在实际项目中，### 现代替代方案\n\n1. **Flexbox布的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "frontend.css.layout"
+    ],
+    "target_source_chunk_id": "frontend_engineer-chunk-410a15a354de"
+  },
+  {
+    "eval_id": "eval-031",
+    "career_id": "operations_engineer",
+    "query": "面试官问我关于# Linux\n\n## 前言\n\n为了便于理解，本文的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "operations.linux.base"
+    ],
+    "target_source_chunk_id": "operations_engineer-chunk-f24a30441e78"
+  },
+  {
+    "eval_id": "eval-032",
+    "career_id": "operations_engineer",
+    "query": "在实际项目中，```bash\n# 应用所有配置\nkubectl的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "operations.kubernetes.pod",
+      "operations.linux.base"
+    ],
+    "target_source_chunk_id": "operations_engineer-chunk-d87ebc3da168"
+  },
+  {
+    "eval_id": "eval-033",
+    "career_id": "operations_engineer",
+    "query": "请详细解释一下`ls` 列出当前目录下的文件，但默认只是显示出最，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "operations.linux.base"
+    ],
+    "target_source_chunk_id": "operations_engineer-chunk-1fc6ca26d5a4"
+  },
+  {
+    "eval_id": "eval-034",
+    "career_id": "operations_engineer",
+    "query": "如果被问到Slurm 的权限管理依赖于其账户数据库，因此需要，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "operations.kubernetes.pod",
+      "operations.linux.base"
+    ],
+    "target_source_chunk_id": "operations_engineer-chunk-65d0fb20cad6"
+  },
+  {
+    "eval_id": "eval-035",
+    "career_id": "operations_engineer",
+    "query": "面试官问我关于|\n| 无参数 | 删除已停止的容器 | `doc的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "operations.docker.container",
+      "operations.linux.base"
+    ],
+    "target_source_chunk_id": "operations_engineer-chunk-34e7c79ba53e"
+  },
+  {
+    "eval_id": "eval-036",
+    "career_id": "product_manager",
+    "query": "面试官问我关于截至2025年，AI营销已从前沿概念演变为企业增长的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "product.data.analytics"
+    ],
+    "target_source_chunk_id": "product_manager-chunk-5b76dec82dfd"
+  },
+  {
+    "eval_id": "eval-037",
+    "career_id": "product_manager",
+    "query": "在实际项目中，三、确定里程碑和关键节点：产品发展的重要坐标\n1.的作用和原理是什么？",
+    "candidate_requirement_ids": [
+      "product.requirements.prd",
+      "product.data.analytics",
+      "product.agile.pm"
+    ],
+    "target_source_chunk_id": "product_manager-chunk-3dd56758df14"
+  },
+  {
+    "eval_id": "eval-038",
+    "career_id": "product_manager",
+    "query": "请详细解释一下以汽车销售企业为例，基于人口统计学维度，可以将用户，以及它的底层实现逻辑。",
+    "candidate_requirement_ids": [
+      "product.requirements.prd",
+      "product.user.persona",
+      "product.agile.pm"
+    ],
+    "target_source_chunk_id": "product_manager-chunk-c55bf17509b1"
+  },
+  {
+    "eval_id": "eval-039",
+    "career_id": "product_manager",
+    "query": "如果被问到其中需要注意的一点是，这里表格的格式是固定的，就用，怎么回答更有深度？",
+    "candidate_requirement_ids": [
+      "product.requirements.prd"
+    ],
+    "target_source_chunk_id": "product_manager-chunk-0ea97f839357"
+  },
+  {
+    "eval_id": "eval-040",
+    "career_id": "product_manager",
+    "query": "面试官问我关于5. 传播：场景化强化与故事化记忆\n新人训练营、价的理解，应该如何回答？",
+    "candidate_requirement_ids": [
+      "product.user.persona",
+      "product.data.analytics"
+    ],
+    "target_source_chunk_id": "product_manager-chunk-ea9103439be5"
+  }
+]

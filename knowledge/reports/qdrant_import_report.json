@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-08-20T01:00:28.331835",
+  "collection_name": "career_knowledge_v1",
+  "vector_dimension": 1024,
+  "imported_count": 12583,
+  "skipped_pending_count": 10921,
+  "embedding_model": "BAAI/bge-m3"
+}

@@ -1,0 +1,42 @@
+# 依赖
+node_modules/
+
+# Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 数据库文件
+*.db
+*.sqlite
+
+# 嵌入模型（体积过大，不上传，需自行下载）
+bge-m3/
+
+# Qdrant 运行锁文件
+backend/qdrant_storage/.lock
+
+# 环境变量
+.env
+.env.local
+
+# 本地运行产物
+backend/*.log
+backend/uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# MCP 工具生成物
+.playwright-mcp/
+
+# Claude Code 内部文件
+.claude/
+
+# 个人笔记 / 实验文件
+*要找什么.txt
+前端需求.txt
+demo-home.html
+template-home.html
+方案二CSS头像预览.html

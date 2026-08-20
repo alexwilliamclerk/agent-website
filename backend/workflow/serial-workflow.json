@@ -1,0 +1,17 @@
+{
+  "workflow_id": "pk-macdm-agent-2026-08",
+  "version": "1.1.0",
+  "mode": "serial_supervisor",
+  "input_contract": "diagnose(user_id, target_job, user_input, gold_labels?, apply_corrections?)",
+  "stages": [
+    {"order": 1, "id": "parse_input", "prompt": "prompts/01_parse_input.md", "input": ["user_id", "target_job", "user_input", "career_skills"], "output": ["evidence_records", "matched_skills", "negative_skills", "unknown_skills"]},
+    {"order": 2, "id": "retrieve_knowledge", "prompt": "prompts/02_retrieve_knowledge.md", "input": ["target_job", "matched_skills", "negative_skills"], "output": ["sources", "retrieval_confidence"]},
+    {"order": 3, "id": "diagnose_capability", "prompt": "prompts/03_diagnose_capability.md", "input": ["target_job", "career_model", "evidence_records", "sources"], "output": ["overall_mastery", "ability_vector", "knowledge_gaps", "gap_records"]},
+    {"order": 4, "id": "calibrate_result", "prompt": "prompts/04_calibrate_result.md", "input": ["diagnosis", "evidence_records", "user_input"], "output": ["validated_diagnosis"], "on_failure": "reject"},
+    {"order": 5, "id": "calibrate_against_ground_truth", "prompt": "prompts/05_calibrate_against_ground_truth.md", "input": ["validated_diagnosis", "requirement_scores", "gold_labels", "apply_corrections"], "output": ["calibration_summary", "calibration_records", "calibrated_diagnosis"], "on_failure": "manual_review"},
+    {"order": 6, "id": "generate_resource", "prompt": "prompts/05_generate_resource.md", "input": ["target_job", "knowledge_point", "user_level", "resource_type", "approved_sources"], "output": ["resource"], "on_failure": "blocked"},
+    {"order": 7, "id": "plan_path", "prompt": "prompts/06_plan_path.md", "input": ["user_id", "target_job", "ability_vector"], "output": ["learning_path"], "on_failure": "reject"}
+  ],
+  "retry_policy": {"max_retries": 1, "retryable_stages": ["retrieve_knowledge", "generate_resource"], "otherwise": "manual_review"},
+  "trace_required": ["trace_id", "prompt_version", "stage_order", "input_summary", "output_summary", "confidence", "source_chunk_ids", "calibration_status", "calibration_accuracy", "blocked"]
+}

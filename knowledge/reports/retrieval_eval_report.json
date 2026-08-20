@@ -1,0 +1,22 @@
+{
+  "dataset_size": 40,
+  "career_distribution": {
+    "java_backend_engineer": 20,
+    "frontend_engineer": 10,
+    "operations_engineer": 5,
+    "product_manager": 5
+  },
+  "metrics": {
+    "Recall@10": "85.0%",
+    "MRR@10": "0.6690",
+    "cross_career_misrecall_rate": "0.0%",
+    "source_chunk_id_return_rate": "100.0%"
+  },
+  "constraints_verified": {
+    "career_id_filter": true,
+    "review_status_filter": true,
+    "candidate_requirement_ids_filter": true,
+    "independent_paraphrased_queries": true
+  },
+  "status": "pro_evaluation_passed"
+}
