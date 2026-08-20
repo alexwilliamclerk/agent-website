@@ -44,11 +44,15 @@ const publicPreview = import.meta.env.DEV && import.meta.env.VITE_PUBLIC_PREVIEW
 const isScrolled = ref(false)
 const diagnosisLink = computed(() => {
   if (publicPreview) return '/diagnosis?demo=1'
-  const id = store.userInfo?.latest_assessment_id
+  const id = store.currentAssessmentId
   return id ? `/diagnosis/${id}` : '/diagnosis'
 })
 const inputLink = computed(() => publicPreview ? '/input?demo=1' : '/input')
-const libraryLink = computed(() => publicPreview ? '/library?demo=1' : '/library')
+const libraryLink = computed(() => {
+  if (publicPreview) return '/library?demo=1'
+  const id = store.currentAssessmentId
+  return id ? `/library?assessment=${encodeURIComponent(id)}` : '/library'
+})
 const openAssessment = () => {
   if (publicPreview || store.isLoggedIn) {
     router.push(publicPreview ? '/input?demo=1' : '/input')
@@ -57,7 +61,10 @@ const openAssessment = () => {
   router.push('/login?next=/input')
 }
 const syncScroll = () => { isScrolled.value = window.scrollY > 12 }
-onMounted(() => window.addEventListener('scroll', syncScroll, { passive: true }))
+onMounted(() => {
+  window.addEventListener('scroll', syncScroll, { passive: true })
+  if (store.isLoggedIn && !store.userInfo) void store.fetchUserInfo()
+})
 onBeforeUnmount(() => window.removeEventListener('scroll', syncScroll))
 </script>
 

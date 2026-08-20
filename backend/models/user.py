@@ -12,5 +12,8 @@ class User(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
+    # The diagnosis currently selected by the learner. It is shared by the
+    # diagnosis and resource pages and survives refresh/login.
+    active_assessment_id = Column(String(36), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

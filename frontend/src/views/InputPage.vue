@@ -313,6 +313,9 @@ async function launchFormalDiagnosis() {
   })
   await waitForCompletion()
   liveProgress.value = { ...liveProgress.value, stage: 'complete', agent: '协同调度器', label: '审查完成', percent: 100, status: 'completed' }
+  await store.fetchUserInfo().catch(() => undefined)
+  // The just-completed assessment is always the immediate navigation target.
+  // The diagnosis page then confirms the server-side active pointer on load.
   await router.push(`/diagnosis/${assessment.id}`)
 }
 async function startReview(forceFinish = false) {

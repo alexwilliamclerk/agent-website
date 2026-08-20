@@ -515,7 +515,11 @@ def _run_assessment(
                 resource.review_reason = result.get("reason")
         _set_progress(assessment_id, "审核纠偏 Agent 已完成来源校验", 98, stage="review", agent="审核纠偏 Agent")
 
-        # ⑦ 持久化并关闭任务。
+        # ⑦ 持久化并关闭任务。新诊断只有在资源与审核全部成功后才
+        # 成为诊断页和资料库共同使用的当前记录。
+        learner = db.query(User).filter(User.id == user_id).first()
+        if learner:
+            learner.active_assessment_id = assessment.id
         db.commit()
         db.refresh(assessment)
         _set_progress(assessment_id, "诊断、资源生成与审核全部完成", 100, status="completed", stage="complete", agent="协同调度器")
@@ -880,7 +884,16 @@ def delete_assessment(
         UserMaterial.assessment_id == assessment.id,
         UserMaterial.user_id == current_user.id,
     ).update({UserMaterial.assessment_id: None}, synchronize_session=False)
+    learner = db.query(User).filter(User.id == current_user.id).first()
+    was_active = bool(learner and learner.active_assessment_id == assessment.id)
     db.delete(assessment)
+    if learner and was_active:
+        replacement = db.query(Assessment).filter(
+            Assessment.user_id == current_user.id,
+            Assessment.id != assessment.id,
+            Assessment.overall_mastery.isnot(None),
+        ).order_by(Assessment.created_at.desc()).first()
+        learner.active_assessment_id = replacement.id if replacement else None
     db.commit()
     _PROGRESS.pop(assessment_id, None)
 

@@ -37,6 +37,7 @@ _ensure_columns("assessments", {
     "material_ids": "TEXT",
     "agent_trace": "TEXT",
 })
+_ensure_columns("users", {"active_assessment_id": "VARCHAR(36)"})
 _ensure_columns("resources", {
     "source_chunk_id": "VARCHAR(100)",
     "source_text": "TEXT",

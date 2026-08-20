@@ -18,6 +18,9 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => !!token.value)
   const username = computed(() => userInfo.value?.username || '')
   const hasAssessment = computed(() => !!userInfo.value?.latest_assessment_id)
+  const currentAssessmentId = computed(() =>
+    userInfo.value?.active_assessment_id || userInfo.value?.latest_assessment_id || '',
+  )
 
   // ---- actions ----
 
@@ -50,6 +53,11 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = info
   }
 
+  /** 选择一条已完成诊断，服务端持久化后同步所有结果页面。 */
+  async function selectAssessment(assessmentId: string) {
+    userInfo.value = await authApi.setActiveAssessment(assessmentId)
+  }
+
   /** 修改密码 */
   async function changePassword(oldPwd: string, newPwd: string) {
     await authApi.changePassword({ old_password: oldPwd, new_password: newPwd })
@@ -71,11 +79,13 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     username,
     hasAssessment,
+    currentAssessmentId,
     // actions
     login,
     register,
     logout,
     fetchUserInfo,
+    selectAssessment,
     changePassword,
     setCurrentSession,
   }

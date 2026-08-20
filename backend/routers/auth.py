@@ -45,7 +45,12 @@ class UserResponse(BaseModel):
     id: str
     username: str
     latest_assessment_id: str | None = None
+    active_assessment_id: str | None = None
     created_at: datetime
+
+
+class ActiveAssessmentRequest(BaseModel):
+    assessment_id: str
 
 
 # ===== 工具函数 =====
@@ -127,23 +132,58 @@ class UpdatePasswordRequest(BaseModel):
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取当前用户信息"""
-    # 查最新评估 ID
     from models.assessment import Assessment
 
+    learner = db.query(User).filter(User.id == current_user.id).first()
+    if not learner:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    completed = db.query(Assessment).filter(
+        Assessment.user_id == learner.id,
+        Assessment.overall_mastery.isnot(None),
+    )
     latest = (
-        db.query(Assessment)
-        .filter(Assessment.user_id == current_user.id)
+        completed
         .order_by(Assessment.created_at.desc())
         .first()
     )
+    active = None
+    if learner.active_assessment_id:
+        active = completed.filter(Assessment.id == learner.active_assessment_id).first()
+    active_id = active.id if active else (latest.id if latest else None)
 
-    # 构造响应，附加 latest_assessment_id
     return {
-        "id": current_user.id,
-        "username": current_user.username,
+        "id": learner.id,
+        "username": learner.username,
         "latest_assessment_id": latest.id if latest else None,
-        "created_at": current_user.created_at,
+        "active_assessment_id": active_id,
+        "created_at": learner.created_at,
     }
+
+
+@router.put("/active-assessment", response_model=UserResponse)
+def set_active_assessment(
+    request: ActiveAssessmentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Persist the diagnosis selected from history for all result pages."""
+    from models.assessment import Assessment
+
+    selected = db.query(Assessment).filter(
+        Assessment.id == request.assessment_id,
+        Assessment.user_id == current_user.id,
+        Assessment.overall_mastery.isnot(None),
+    ).first()
+    if not selected:
+        raise HTTPException(status_code=404, detail="诊断结果不存在或尚未完成")
+
+    learner = db.query(User).filter(User.id == current_user.id).first()
+    if not learner:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    learner.active_assessment_id = selected.id
+    db.commit()
+    db.refresh(learner)
+    return get_me(current_user=learner, db=db)
 
 
 

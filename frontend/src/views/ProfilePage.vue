@@ -63,7 +63,7 @@
                   v-for="item in history"
                   :key="item.id"
                   class="history-item"
-                  @click="$router.push(`/diagnosis/${item.id}`)"
+                  @click="openHistory(item)"
                 >
                   <div class="history-left">
                     <div class="history-job">{{ jobTitleMap[item.job_id] || item.job_id }}</div>
@@ -145,12 +145,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getAssessmentList, deleteAssessment, type AssessmentListItem } from '@/api/assessment'
 import { getJobList, type JobInfo } from '@/api/jobs'
 
 const store = useUserStore()
+const router = useRouter()
 
 // ---- 页面加载 ----
 const loading = ref(false)
@@ -219,9 +221,24 @@ async function handleDelete(item: AssessmentListItem) {
     await deleteAssessment(item.id)
     ElMessage.success('已删除')
     history.value = history.value.filter(h => h.id !== item.id)
+    await store.fetchUserInfo()
   } catch (e: any) {
     const detail = e?.response?.data?.detail
     ElMessage.error(typeof detail === 'string' ? detail : '删除失败')
+  }
+}
+
+async function openHistory(item: AssessmentListItem) {
+  if (item.overall_mastery === null) {
+    await router.push(`/diagnosis/${item.id}`)
+    return
+  }
+  try {
+    await store.selectAssessment(item.id)
+    await router.push(`/diagnosis/${item.id}`)
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail
+    ElMessage.error(typeof detail === 'string' ? detail : '切换诊断记录失败')
   }
 }
 

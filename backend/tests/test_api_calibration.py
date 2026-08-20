@@ -111,6 +111,12 @@ class ApiCalibrationTests(unittest.TestCase):
         stages = {event["stage"] for event in progress_body["events"]}
         self.assertTrue({"material", "diagnosis", "path", "resource", "review", "complete"}.issubset(stages))
 
+        # A diagnosis becomes globally active only after the complete stage,
+        # so both the diagnosis page and resource library switch together.
+        current_user = self.client.get("/api/auth/me")
+        self.assertEqual(current_user.status_code, 200, current_user.text)
+        self.assertEqual(current_user.json()["active_assessment_id"], assessment_id)
+
         calibration = self.client.get(f"/api/assessment/{assessment_id}/calibration")
         self.assertEqual(calibration.status_code, 200)
         self.assertEqual(calibration.json()["summary"]["evaluated_count"], 1)

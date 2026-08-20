@@ -190,6 +190,7 @@ const learningRecords = ref<Record<string, LearningRecordInfo>>({})
 const currentPath = ref<LearningPathInfo | null>(null)
 const activeResourceId = ref('')
 const demoMode = computed(() => publicPreview && route.query.demo === '1')
+let libraryLoadSequence = 0
 
 const demoResources: ResourceInfo[] = [
   { id: 'demo-java-core', assessment_id: 'demo-assessment', knowledge_point: 'Java 并发', content_type: '个性化讲义', title: 'Java 并发核心原理精讲', body: '从线程模型、锁语义与线程池参数入手，结合订单处理场景理解并发安全边界，并完成一组可验证的代码实验。', difficulty: 3, source_chunk_id: 'java_backend_0182', source_text: 'Java 并发与线程池领域知识片段', review_status: 'passed', review_reason: '知识点与来源片段一致，代码范围明确。', display_status: 'published', generation_method: 'rag_agent', created_at: '2026-08-16T10:00:00' },
@@ -293,6 +294,7 @@ function updateSpotlight(event: PointerEvent) { const target = event.currentTarg
 function clearSpotlight() { spotlight.value.active = false }
 function handleShortcut(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); nextTick(() => searchInput.value?.focus()) } }
 async function loadLibrary() {
+  const sequence = ++libraryLoadSequence
   libraryLoading.value = true; libraryError.value = ''; resources.value = []; currentPath.value = null; resetFilters()
   try {
     if (demoMode.value) {
@@ -304,10 +306,19 @@ async function loadLibrary() {
       ] }
       return
     }
-    if (!publicPreview && !store.userInfo) await store.fetchUserInfo()
+    // The active diagnosis is server-authoritative. Refreshing the library
+    // picks up a newly completed diagnosis; an explicit history selection is
+    // already persisted by the profile page and therefore remains selected.
+    await store.fetchUserInfo()
     const byQuery = typeof route.query.assessment === 'string' ? route.query.assessment : ''
     const byParam = typeof route.params.assessmentId === 'string' ? route.params.assessmentId : ''
-    assessmentId.value = byQuery || byParam || store.userInfo?.latest_assessment_id || ''
+    const requestedId = byQuery || byParam
+    const currentId = store.currentAssessmentId
+    if (currentId && requestedId !== currentId) {
+      await router.replace({ path: '/library', query: { assessment: currentId } })
+      return
+    }
+    assessmentId.value = currentId
     if (!assessmentId.value) return
     const [resourceItems, bookmarks, records, paths] = await Promise.all([
       getResourceList({ assessment_id: assessmentId.value }),
@@ -315,15 +326,21 @@ async function loadLibrary() {
       getLearningRecords(assessmentId.value),
       store.userInfo ? getLearningPaths(store.userInfo.id) : Promise.resolve([]),
     ])
+    if (sequence !== libraryLoadSequence) return
     resources.value = resourceItems
     bookmarkedIds.value = new Set(bookmarks.map(item => item.resource_id))
     learningRecords.value = Object.fromEntries(records.map(item => [item.resource_id, item]))
-    currentPath.value = paths.find(path => path.assessment_id === assessmentId.value) || paths[0] || null
-  } catch (error: any) { libraryError.value = error?.response?.data?.detail || '资料库加载失败'; resources.value = [] }
-  finally { libraryLoading.value = false }
+    currentPath.value = paths.find(path => path.assessment_id === assessmentId.value) || null
+  } catch (error: any) {
+    if (sequence === libraryLoadSequence) {
+      libraryError.value = error?.response?.data?.detail || '资料库加载失败'
+      resources.value = []
+    }
+  }
+  finally { if (sequence === libraryLoadSequence) libraryLoading.value = false }
 }
-watch(() => [route.query.assessment, route.query.demo, route.params.assessmentId], loadLibrary)
-onMounted(() => { window.addEventListener('keydown', handleShortcut); loadLibrary() })
+watch(() => [route.query.assessment, route.query.demo, route.params.assessmentId], () => void loadLibrary(), { immediate: true })
+onMounted(() => { window.addEventListener('keydown', handleShortcut) })
 onBeforeUnmount(() => window.removeEventListener('keydown', handleShortcut))
 </script>
 

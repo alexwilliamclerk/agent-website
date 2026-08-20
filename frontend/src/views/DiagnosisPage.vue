@@ -97,6 +97,7 @@ const publicPreview = import.meta.env.DEV && import.meta.env.VITE_PUBLIC_PREVIEW
 const demoMode = computed(() => publicPreview && route.query.demo === '1')
 const assessment = ref<AssessmentResponse | null>(null); const loading = ref(false); const loadError = ref(''); const progress = ref<AssessmentProgress>({ stage: 'material', agent: '资料解析 Agent', label: '正在解析学习情况', percent: 0, status: 'waiting', updated_at: null, events: [] }); const running = ref(false)
 const radarRef = ref<HTMLDivElement | null>(null); const scoreRef = ref<HTMLDivElement | null>(null); let chart: echarts.ECharts | null = null; let scoreChart: echarts.ECharts | null = null; let progressTimer: number | null = null; let progressStreamController: AbortController | null = null; let finishing = false
+let assessmentLoadSequence = 0
 const currentPath = ref<LearningPathInfo | null>(null); const pathLoading = ref(false); const resources = ref<ResourceInfo[]>([]); const traceSourceCount = ref(0)
 const showCalibration = ref(false); const calibrationSubmitting = ref(false); const applyCorrections = ref(false); const goldScores = ref<Record<string, number | null>>({})
 const jobTitle = ref('目标岗位能力模型')
@@ -154,9 +155,46 @@ function openLibrary() { router.push({ path: '/library', query: demoMode.value ?
 async function loadDemoFixture() { stopProgressUpdates(); loading.value = false; loadError.value = ''; running.value = false; assessment.value = demoAssessment; jobTitle.value = '后端开发工程师'; currentPath.value = demoPath; resources.value = demoResources; traceSourceCount.value = 12; await nextTick(); renderVisuals() }
 async function loadAssessment() {
   if (demoMode.value) { await loadDemoFixture(); return }
-  if (!assessmentId.value) { if (!publicPreview && !store.userInfo) await store.fetchUserInfo().catch(() => undefined); const latest = store.userInfo?.latest_assessment_id; if (latest) { await router.replace(`/diagnosis/${latest}`); return }; assessment.value = null; currentPath.value = null; resources.value = []; traceSourceCount.value = 0; return }
+  const sequence = ++assessmentLoadSequence
   loading.value = true; loadError.value = ''
-  try { const item = await getAssessment(assessmentId.value); assessment.value = item; jobTitle.value = '目标岗位能力模型'; getJobList().then(jobs => { jobTitle.value = jobs.find(job => job.id === item.job_id)?.job_title || '目标岗位能力模型' }).catch(() => undefined); running.value = item.overall_mastery === null; if (running.value) startProgressUpdates(); else { stopProgressUpdates(); await Promise.all([loadPath(), loadResources(), loadTrace()]); nextTick(renderVisuals) } } catch (error: any) { loadError.value = error?.response?.data?.detail || '无法读取诊断结果' } finally { loading.value = false }
+  try {
+    // Refreshing this page must re-read the server pointer. A newly completed
+    // diagnosis therefore replaces an older result immediately, while a
+    // history selection remains stable until the server pointer changes.
+    await store.fetchUserInfo().catch(() => undefined)
+    if (sequence !== assessmentLoadSequence) return
+    const currentId = store.currentAssessmentId
+    const requestedId = assessmentId.value
+    let requestedAssessment: AssessmentResponse | null = null
+    if (currentId && requestedId && requestedId !== currentId) {
+      // Completed history must follow the persisted selection, but an
+      // in-progress diagnosis remains directly accessible from history so the
+      // learner can inspect its live Agent progress.
+      requestedAssessment = await getAssessment(requestedId)
+      if (sequence !== assessmentLoadSequence) return
+      if (requestedAssessment.overall_mastery !== null) {
+        await router.replace(`/diagnosis/${currentId}`)
+        return
+      }
+    } else if (currentId && !requestedId) {
+      await router.replace(`/diagnosis/${currentId}`)
+      return
+    }
+    const targetId = requestedId || currentId
+    if (!targetId) {
+      assessment.value = null; currentPath.value = null; resources.value = []; traceSourceCount.value = 0
+      return
+    }
+    const item = requestedAssessment || await getAssessment(targetId)
+    if (sequence !== assessmentLoadSequence) return
+    assessment.value = item
+    jobTitle.value = '目标岗位能力模型'
+    getJobList().then(jobs => { jobTitle.value = jobs.find(job => job.id === item.job_id)?.job_title || '目标岗位能力模型' }).catch(() => undefined)
+    running.value = item.overall_mastery === null
+    if (running.value) startProgressUpdates()
+    else { stopProgressUpdates(); await Promise.all([loadPath(), loadResources(), loadTrace()]); nextTick(renderVisuals) }
+  } catch (error: any) { loadError.value = error?.response?.data?.detail || '无法读取诊断结果' }
+  finally { if (sequence === assessmentLoadSequence) loading.value = false }
 }
 async function startPolling() { stopPolling(); await pollProgress(); progressTimer = window.setInterval(pollProgress, 2500) }
 async function pollProgress() { if (!assessmentId.value) return; try { progress.value = await getAssessmentProgress(assessmentId.value); if (progress.value.status === 'failed') { stopProgressUpdates(); running.value = false; loadError.value = progress.value.label; return }; if (progress.value.percent >= 100) await refreshCompletedAssessment() } catch { /* next verified polling cycle retries */ } }
@@ -188,7 +226,7 @@ async function refreshCompletedAssessment() {
   if (finishing) return
   finishing = true
   stopProgressUpdates()
-  try { await loadAssessment() } finally { finishing = false }
+  try { await store.fetchUserInfo().catch(() => undefined); await loadAssessment() } finally { finishing = false }
 }
 async function loadPath() { if (!assessment.value) return; if (!store.userInfo) await store.fetchUserInfo().catch(() => undefined); if (!store.userInfo) return; pathLoading.value = true; try { const paths = await getLearningPaths(store.userInfo.id); currentPath.value = paths.find(path => path.assessment_id === assessment.value?.id) || null } finally { pathLoading.value = false } }
 async function loadResources() { if (!assessment.value) return; try { resources.value = await getResourceList({ assessment_id: assessment.value.id }) } catch { resources.value = [] } }
@@ -240,7 +278,7 @@ function renderRadar() {
       radius: '73%',
       splitNumber: 5,
       axisName: { color: 'rgba(35,76,53,.78)', fontSize: 10, fontWeight: 600 },
-      nameGap: 10,
+      axisNameGap: 10,
       splitArea: { areaStyle: { color: ['rgba(255,255,255,.01)', 'rgba(237,252,243,.055)', 'rgba(255,255,255,.012)', 'rgba(222,250,230,.055)', 'rgba(255,255,255,.01)'] } },
       splitLine: { lineStyle: { color: ['rgba(5,118,66,.075)', 'rgba(5,118,66,.12)'], width: 1 } },
       axisLine: { lineStyle: { color: 'rgba(5,118,66,.14)' } },

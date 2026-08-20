@@ -14,6 +14,7 @@ export interface UserInfo {
   id: string
   username: string
   latest_assessment_id: string | null
+  active_assessment_id: string | null
   created_at: string
 }
 
@@ -30,6 +31,11 @@ export function register(data: LoginParams): Promise<any> {
 /** 获取当前用户信息 */
 export function getMe(): Promise<UserInfo> {
   return request.get('/auth/me') as any
+}
+
+/** 选择诊断历史后，将能力诊断与资料库共同切换到该记录。 */
+export function setActiveAssessment(assessmentId: string): Promise<UserInfo> {
+  return request.put('/auth/active-assessment', { assessment_id: assessmentId }) as any
 }
 
 /** 修改密码 */
