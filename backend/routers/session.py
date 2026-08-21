@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from database import get_db
@@ -52,6 +52,14 @@ class ReviewTurnRequest(BaseModel):
     # Explicitly choosing not to supplement counts as the learner's next turn.
     force_finish: bool = False
 
+    @field_validator("content")
+    @classmethod
+    def reject_blank_turn(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("每轮回答至少需要 2 个有效字符")
+        return normalized
+
 
 class ReviewTurnResponse(BaseModel):
     session_id: str
@@ -77,6 +85,8 @@ def create_session(
     db: DBSession = Depends(get_db),
 ):
     """创建学习会话"""
+    if not db.query(Job.id).filter(Job.id == request.job_id).first():
+        raise HTTPException(status_code=404, detail="目标岗位不存在")
     session = Session(
         user_id=current_user.id,
         job_id=request.job_id,

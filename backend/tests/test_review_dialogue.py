@@ -92,6 +92,7 @@ class ReviewDialogueApiTests(unittest.TestCase):
         self.assertEqual(second.json()["turn_count"], 2)
         self.assertEqual(second.json()["decision"], "ready_for_diagnosis")
         self.assertTrue(second.json()["ready_for_diagnosis"])
+        self.assertEqual(second.json()["question"], "")
         self.assertTrue(second.json()["context_trace_id"])
 
         messages = self.client.get(f"/api/session/{session_id}/messages")
@@ -133,6 +134,10 @@ class ReviewDialogueApiTests(unittest.TestCase):
         )
         self.assertNotIn("Redis", profile.negative_skills)
         self.assertGreater(profile.matched_skills.get("Redis", 0), 0.5)
+
+    def test_unknown_job_cannot_create_review_session(self):
+        response = self.client.post("/api/session/create", json={"job_id": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 404, response.text)
 
 
 if __name__ == "__main__":

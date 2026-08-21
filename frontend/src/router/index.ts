@@ -93,7 +93,7 @@ router.beforeEach((to, _from, next) => {
   // 检查 token：无 token → 重定向 /login
   const token = getToken()
   if (!token) {
-    next('/login')
+    next({ path: '/login', query: { next: to.fullPath } })
     return
   }
 

@@ -172,7 +172,10 @@ import { useUserStore } from '@/stores/user'
 const route = useRoute()
 const router = useRouter()
 const store = useUserStore()
-const publicPreview = import.meta.env.DEV && import.meta.env.VITE_PUBLIC_PREVIEW === 'true'
+// Keep the local visual fixture consistent with the review and diagnosis pages.
+// import.meta.env.DEV is compiled to false for production, so this cannot
+// disable production authentication.
+const demoMode = computed(() => import.meta.env.DEV && route.query.demo === '1')
 const resources = ref<ResourceInfo[]>([])
 const libraryLoading = ref(false)
 const libraryError = ref('')
@@ -189,7 +192,6 @@ const bookmarkedIds = ref<Set<string>>(new Set())
 const learningRecords = ref<Record<string, LearningRecordInfo>>({})
 const currentPath = ref<LearningPathInfo | null>(null)
 const activeResourceId = ref('')
-const demoMode = computed(() => publicPreview && route.query.demo === '1')
 let libraryLoadSequence = 0
 
 const demoResources: ResourceInfo[] = [
@@ -261,7 +263,9 @@ function openResource(resource: ResourceInfo, start = false) {
   router.push({ path: `/resource/${resource.id}`, query: start ? { start: '1' } : undefined })
 }
 function continueLearning() {
-  const current = currentPath.value?.steps.find(step => step.status === 'current')
+  const current = currentPath.value?.steps.find(step => step.status === 'in_progress')
+    || currentPath.value?.steps.find(step => step.status === 'current')
+    || currentPath.value?.steps.find(step => step.status === 'not_started' && step.resource_id)
   const target = current?.resource_id ? resources.value.find(item => item.id === current.resource_id) : featuredResource.value
   if (!target) { ElMessage.warning('当前学习路径还没有可打开的资料'); return }
   openResource(target, true)
@@ -324,7 +328,7 @@ async function loadLibrary() {
       getResourceList({ assessment_id: assessmentId.value }),
       getResourceBookmarks(),
       getLearningRecords(assessmentId.value),
-      store.userInfo ? getLearningPaths(store.userInfo.id) : Promise.resolve([]),
+      store.userInfo ? getLearningPaths(store.userInfo.id, assessmentId.value) : Promise.resolve([]),
     ])
     if (sequence !== libraryLoadSequence) return
     resources.value = resourceItems

@@ -22,6 +22,14 @@ const request = axios.create({
   timeout: 30000,
 })
 
+function errorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map(item => typeof item?.msg === 'string' ? item.msg : '').filter(Boolean).join('；') || '请求参数不符合要求'
+  }
+  return '请求失败'
+}
+
 // 请求拦截器：自动附加 token
 request.interceptors.request.use(
   (config) => {
@@ -43,10 +51,11 @@ request.interceptors.response.use(
         setToken(null)
         // 不在登录页才跳转，避免死循环
         if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
+          const next = `${window.location.pathname}${window.location.search}${window.location.hash}`
+          window.location.href = `/login?next=${encodeURIComponent(next)}`
         }
       }
-      ElMessage.error(data?.detail || '请求失败')
+      ElMessage.error(errorDetail(data?.detail))
     } else {
       ElMessage.error('网络连接失败，请检查后端服务')
     }

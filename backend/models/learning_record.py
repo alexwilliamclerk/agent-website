@@ -14,7 +14,7 @@ class LearningRecord(Base):
     session_id = Column(String(36), ForeignKey("sessions.id"), nullable=False)
     resource_id = Column(String(36), ForeignKey("resources.id"), nullable=False)
     status = Column(String(20), default="not_started")  # not_started, in_progress, completed
-    score = Column(Numeric(5, 4), nullable=True)
+    score = Column(Numeric(6, 2), nullable=True)  # 0-100
     time_spent = Column(Integer, default=0)  # 秒
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)

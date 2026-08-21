@@ -283,6 +283,8 @@ def create_assessment(
     db: Session = Depends(get_db),
 ):
     """创建评估"""
+    if not db.query(Job.id).filter(Job.id == request.job_id).first():
+        raise HTTPException(status_code=404, detail="目标岗位不存在")
     assessment = Assessment(
         user_id=current_user.id,
         job_id=request.job_id,
@@ -302,7 +304,9 @@ def review_input(
 ):
     """兼容旧客户端的轻量预检；该接口不能启动正式诊断。"""
     job = db.query(Job).filter(Job.id == request.job_id).first()
-    target_job = job.job_title if job else ""
+    if not job:
+        raise HTTPException(status_code=404, detail="目标岗位不存在")
+    target_job = job.job_title
     from adapters.input_review import review_input as _review
 
     return _review(request.user_input, target_job)
@@ -371,7 +375,9 @@ def _run_assessment(
         assessment.calibration_status = calibration.get("status", "unvalidated")
         assessment.calibration_summary = calibration
         _persist_calibration_records(db, assessment.id, calibration, diagnosis.get("calibration_records", []))
-        db.commit()
+        # Keep the seven-Agent result atomic: a diagnosis is not publishable
+        # until its path, resources and source reviews are all persisted.
+        db.flush()
 
         # ③ 路径规划 Agent。
         raw_vector = [item["value"] for item in diagnosis["ability_vector"]]
@@ -518,7 +524,13 @@ def _run_assessment(
         # ⑦ 持久化并关闭任务。新诊断只有在资源与审核全部成功后才
         # 成为诊断页和资料库共同使用的当前记录。
         learner = db.query(User).filter(User.id == user_id).first()
-        if learner:
+        newer_submission = db.query(Assessment.id).filter(
+            Assessment.user_id == user_id,
+            Assessment.id != assessment.id,
+            Assessment.overall_mastery.isnot(None),
+            Assessment.created_at > assessment.created_at,
+        ).first()
+        if learner and not newer_submission:
             learner.active_assessment_id = assessment.id
         db.commit()
         db.refresh(assessment)
@@ -526,6 +538,17 @@ def _run_assessment(
     except Exception as error:
         traceback.print_exc()
         db.rollback()
+        # Release the completed review conversation so the learner can retry
+        # a failed formal workflow without repeating the mandatory dialogue.
+        db.query(LearningSession).filter(
+            LearningSession.assessment_id == assessment_id,
+            LearningSession.user_id == user_id,
+        ).update({
+            LearningSession.assessment_id: None,
+            LearningSession.status: "ready_for_diagnosis",
+            LearningSession.current_step: 2,
+        }, synchronize_session=False)
+        db.commit()
         current = _get_progress(assessment_id)
         _set_progress(
             assessment_id,
@@ -559,6 +582,10 @@ def submit_assessment(
     if not assessment:
         raise HTTPException(status_code=404, detail="评估不存在")
 
+    job = db.query(Job).filter(Job.id == assessment.job_id).first()
+    if not job:
+        raise HTTPException(status_code=409, detail="当前诊断绑定的目标岗位已失效")
+
     materials = []
     if request.material_ids:
         materials = db.query(UserMaterial).filter(
@@ -580,14 +607,20 @@ def submit_assessment(
         user_id=current_user.id,
         job_id=assessment.job_id,
     )
+    if review_session.assessment_id:
+        if review_session.assessment_id == assessment.id and assessment.user_input:
+            db.refresh(assessment)
+            return assessment
+        raise HTTPException(status_code=409, detail="该资料审查会话已用于另一条诊断")
+    if assessment.user_input:
+        raise HTTPException(status_code=409, detail="该诊断已提交，请勿重复启动")
     # Do not trust a browser-assembled transcript. The server rebuilds the
     # diagnosis input from persisted, learner-authored conversation turns.
     agent_input = conversation_context
     if material_context:
         agent_input = f"{agent_input}\n\n{material_context}".strip()
 
-    job = db.query(Job).filter(Job.id == assessment.job_id).first()
-    target_job = job.job_title if job else ""
+    target_job = job.job_title
     assessment.user_input = agent_input
     assessment.material_ids = [item.id for item in materials]
     for item in materials:
@@ -826,7 +859,7 @@ def get_diagnosis(
     if not assessment:
         raise HTTPException(status_code=404, detail="评估不存在")
 
-    if not assessment.overall_mastery:
+    if assessment.overall_mastery is None:
         raise HTTPException(status_code=400, detail="评估尚未完成")
 
     return {
@@ -884,6 +917,14 @@ def delete_assessment(
         UserMaterial.assessment_id == assessment.id,
         UserMaterial.user_id == current_user.id,
     ).update({UserMaterial.assessment_id: None}, synchronize_session=False)
+    db.query(LearningSession).filter(
+        LearningSession.assessment_id == assessment.id,
+        LearningSession.user_id == current_user.id,
+    ).update({
+        LearningSession.assessment_id: None,
+        LearningSession.status: "ready_for_diagnosis",
+        LearningSession.current_step: 2,
+    }, synchronize_session=False)
     learner = db.query(User).filter(User.id == current_user.id).first()
     was_active = bool(learner and learner.active_assessment_id == assessment.id)
     db.delete(assessment)

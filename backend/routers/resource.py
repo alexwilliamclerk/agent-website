@@ -64,6 +64,7 @@ def search_resources(
     q: str = Query(..., description="搜索关键词"),
     job: str = Query("产品经理", description="目标岗位"),
     top_k: int = Query(5, ge=1, le=20, description="返回条数"),
+    _current_user: User = Depends(get_current_user),
 ):
     """向量检索知识库"""
     items = vector_adapter.search_similar_resources(query=q, job=job, top_k=top_k)

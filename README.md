@@ -163,7 +163,7 @@ GET /api/assessment/{assessment_id}/progress
 }
 ```
 
-阶段包括 `material`、`diagnosis`、`path`、`resource`、`review` 和 `complete`。失败时进度不会被清空，而是返回 `failed`，便于前端终止动画并提示重试。
+阶段包括 `material`、`retrieval`、`diagnosis`、`calibration`、`path`、`resource`、`review` 和 `complete`。失败时进度不会被清空，而是返回 `failed`，便于前端终止动画并提示重试。
 
 > 当前进度事件保存在后端进程内，适用于本地演示和单 Worker 部署。采用多 Worker 或多服务器部署时，应将进度状态迁移到 Redis，并按 `assessment_id` 设置过期时间，避免负载均衡后读取到不同进程的数据。
 
@@ -175,6 +175,7 @@ GET /api/assessment/{assessment_id}/progress
 - 资料审查、能力诊断、资料库、资源详情和个人中心默认需要登录。
 - `GET /api/auth/me` 同时返回最新诊断和当前选中诊断；`PUT /api/auth/active-assessment` 用于选择历史记录。能力诊断页、资料库和学习路径均以当前选中诊断为同一数据作用域，禁止混用其他诊断的资源。
 - 新诊断只有在能力分析、资源生成和审核纠偏全部提交成功后，才会成为当前记录。用户刷新能力诊断或资料库时会重新读取服务端状态，因此能立即切换到刚完成的新结果；没有新诊断或历史选择时，原结果保持不变。
+- 七 Agent 正式流程按单个数据库事务发布：路径、资源或审核任一步失败都会回滚诊断结果，避免出现“诊断有分数、资料库却为空”的半成品状态。重复提交同一会话保持幂等，不会重复生成资源；失败时会释放已完成的两轮审查会话，用户可以直接重试正式诊断。
 - `VITE_PUBLIC_PREVIEW=true` 只用于本地开发视觉验收；源码同时要求 `import.meta.env.DEV`，生产构建会强制关闭公开预览。
 - 正式运行和生产构建始终启用登录认证，资料审查、能力诊断、资料库和资源详情不会因环境变量误配而公开。
 
@@ -183,7 +184,10 @@ GET /api/assessment/{assessment_id}/progress
 ```env
 JWT_SECRET_KEY=replace-with-a-long-random-secret
 JWT_EXPIRE_MINUTES=1440
+CORS_ORIGINS=https://your-frontend.example.com
 ```
+
+本地开发允许 `localhost` 和 `127.0.0.1` 的任意端口；对外部署必须通过 `CORS_ORIGINS` 明确填写前端域名，业务接口不接受未登录访问。
 
 ## 环境要求
 
@@ -391,7 +395,7 @@ cd frontend
 npm run build
 ```
 
-当前自动化测试覆盖校准数据持久化、资源收藏、学习进度、评估删除清理和 Agent 进度事件。比赛指标仍需使用独立测试集、人工标注和真实学习者样本计算，不能只引用单元测试通过率。
+当前自动化测试覆盖校准数据持久化、资源收藏、学习进度、评估删除清理、Agent 进度事件、两轮对话准入、重复提交幂等、失败事务回滚、无效岗位拦截、零分诊断读取和跨用户资源隔离。比赛指标仍需使用独立测试集、人工标注和真实学习者样本计算，不能只引用单元测试通过率。
 
 ## 安全说明
 

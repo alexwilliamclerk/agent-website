@@ -93,8 +93,9 @@ import { getJobList } from '@/api/jobs'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute(); const router = useRouter(); const store = useUserStore()
-const publicPreview = import.meta.env.DEV && import.meta.env.VITE_PUBLIC_PREVIEW === 'true'
-const demoMode = computed(() => publicPreview && route.query.demo === '1')
+// An explicit demo query is available only in Vite development builds.
+// Production builds always keep authentication and real API data enabled.
+const demoMode = computed(() => import.meta.env.DEV && route.query.demo === '1')
 const assessment = ref<AssessmentResponse | null>(null); const loading = ref(false); const loadError = ref(''); const progress = ref<AssessmentProgress>({ stage: 'material', agent: '资料解析 Agent', label: '正在解析学习情况', percent: 0, status: 'waiting', updated_at: null, events: [] }); const running = ref(false)
 const radarRef = ref<HTMLDivElement | null>(null); const scoreRef = ref<HTMLDivElement | null>(null); let chart: echarts.ECharts | null = null; let scoreChart: echarts.ECharts | null = null; let progressTimer: number | null = null; let progressStreamController: AbortController | null = null; let finishing = false
 let assessmentLoadSequence = 0
@@ -228,7 +229,7 @@ async function refreshCompletedAssessment() {
   stopProgressUpdates()
   try { await store.fetchUserInfo().catch(() => undefined); await loadAssessment() } finally { finishing = false }
 }
-async function loadPath() { if (!assessment.value) return; if (!store.userInfo) await store.fetchUserInfo().catch(() => undefined); if (!store.userInfo) return; pathLoading.value = true; try { const paths = await getLearningPaths(store.userInfo.id); currentPath.value = paths.find(path => path.assessment_id === assessment.value?.id) || null } finally { pathLoading.value = false } }
+async function loadPath() { if (!assessment.value) return; if (!store.userInfo) await store.fetchUserInfo().catch(() => undefined); if (!store.userInfo) return; pathLoading.value = true; try { const paths = await getLearningPaths(store.userInfo.id, assessment.value.id); currentPath.value = paths[0] || null } finally { pathLoading.value = false } }
 async function loadResources() { if (!assessment.value) return; try { resources.value = await getResourceList({ assessment_id: assessment.value.id }) } catch { resources.value = [] } }
 async function loadTrace() { if (!assessment.value) return; try { const response = await getAssessmentAgents(assessment.value.id); traceSourceCount.value = response.trace.retrieval_sources?.length || 0 } catch { traceSourceCount.value = 0 } }
 function renderScore() {

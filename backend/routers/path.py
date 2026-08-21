@@ -4,13 +4,14 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.path import LearningPath
 from models.resource import Resource
+from models.assessment import Assessment
 from models.learning_record import LearningRecord
 from models.job import Job
 from models.user import User
@@ -61,7 +62,9 @@ def _enrich_steps(steps: list[dict], user_id: str, target_job: str, db: Session,
         # 查 resource_id（按诊断隔离：优先匹配本诊断的资源）
         q = (
             db.query(Resource)
+            .join(Assessment, Resource.assessment_id == Assessment.id)
             .filter(
+                Assessment.user_id == user_id,
                 Resource.knowledge_point == s["knowledge_point"],
                 Resource.content_type == s["resource_type"],
                 Resource.review_status.in_(["passed", "partial"]),
@@ -102,6 +105,7 @@ def _enrich_steps(steps: list[dict], user_id: str, target_job: str, db: Session,
 @router.get("/{user_id}", response_model=list[LearningPathResponse])
 def get_learning_paths(
     user_id: str,
+    assessment_id: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -109,9 +113,17 @@ def get_learning_paths(
     if user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权访问")
 
-    paths = db.query(LearningPath).filter(
-        LearningPath.user_id == user_id,
-    ).order_by(LearningPath.created_at.desc()).all()
+    query = db.query(LearningPath).filter(LearningPath.user_id == user_id)
+    if assessment_id:
+        assessment = db.query(Assessment.id).filter(
+            Assessment.id == assessment_id,
+            Assessment.user_id == current_user.id,
+            Assessment.overall_mastery.isnot(None),
+        ).first()
+        if not assessment:
+            raise HTTPException(status_code=404, detail="诊断记录不存在或尚未完成")
+        query = query.filter(LearningPath.assessment_id == assessment_id)
+    paths = query.order_by(LearningPath.created_at.desc()).all()
 
     # 为每条路径的每个 step 补上 resource_id、status、record_id、weight
     for path in paths:

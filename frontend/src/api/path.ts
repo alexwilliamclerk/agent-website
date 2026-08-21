@@ -25,6 +25,6 @@ export interface LearningPathInfo {
 }
 
 /** 查询用户的学习路径 */
-export function getLearningPaths(userId: string): Promise<LearningPathInfo[]> {
-  return request.get(`/path/${userId}`) as any
+export function getLearningPaths(userId: string, assessmentId?: string): Promise<LearningPathInfo[]> {
+  return request.get(`/path/${userId}`, { params: assessmentId ? { assessment_id: assessmentId } : undefined }) as any
 }

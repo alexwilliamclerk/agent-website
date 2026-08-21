@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import re
-import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.material import UserMaterial
+from models.job import Job
 from models.user import User
 from routers.auth import get_current_user
 
@@ -26,6 +26,7 @@ TEXT_EXTENSIONS = {".txt", ".md", ".json", ".csv", ".py", ".js", ".ts", ".java",
 DOCUMENT_EXTENSIONS = {".pdf", ".docx"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 ALLOWED_EXTENSIONS = TEXT_EXTENSIONS | DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 class MaterialResponse(BaseModel):
@@ -46,6 +47,14 @@ class CreateTextMaterialRequest(BaseModel):
     content: str = Field(min_length=1, max_length=30_000)
     title: str = Field(default="补充说明", min_length=1, max_length=120)
     job_id: str | None = None
+
+    @field_validator("content", "title")
+    @classmethod
+    def reject_blank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("内容不能为空")
+        return normalized
 
 
 def _safe_name(name: str) -> str:
@@ -107,6 +116,11 @@ def _serialize(material: UserMaterial) -> dict:
     }
 
 
+def _validate_job(job_id: str | None, db: Session) -> None:
+    if job_id and not db.query(Job.id).filter(Job.id == job_id).first():
+        raise HTTPException(status_code=404, detail="目标岗位不存在")
+
+
 @router.get("/list", response_model=list[MaterialResponse])
 def list_materials(
     job_id: str | None = None,
@@ -133,15 +147,27 @@ def upload_material(
     extension = Path(original_name).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="仅支持 PDF、DOCX、TXT、代码文件和常见图片")
+    _validate_job(job_id, db)
 
     storage_name = f"{uuid.uuid4().hex}{extension}"
     destination = UPLOAD_DIR / storage_name
-    with destination.open("wb") as output:
-        shutil.copyfileobj(file.file, output)
-    size_bytes = destination.stat().st_size
-    if size_bytes > MAX_FILE_BYTES:
+    size_bytes = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := file.file.read(UPLOAD_CHUNK_BYTES):
+                size_bytes += len(chunk)
+                if size_bytes > MAX_FILE_BYTES:
+                    raise HTTPException(status_code=413, detail="单个文件不能超过 15MB")
+                output.write(chunk)
+    except Exception:
         destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=413, detail="单个文件不能超过 15MB")
+        raise
+    finally:
+        file.file.close()
+
+    if size_bytes == 0:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="不能上传空文件")
 
     status, extracted_text, error_message = _parse_file(destination, extension)
     material = UserMaterial(
@@ -167,6 +193,7 @@ def create_text_material(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _validate_job(request.job_id, db)
     material = UserMaterial(
         user_id=current_user.id,
         job_id=request.job_id,

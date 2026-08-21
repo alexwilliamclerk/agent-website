@@ -12,6 +12,7 @@ from database import SessionLocal
 from models.assessment import Assessment
 from models.job import Job
 from models.learning_record import LearningRecord
+from models.path import LearningPath
 from models.resource import Resource
 from models.resource_bookmark import ResourceBookmark
 from models.session import Session
@@ -112,6 +113,54 @@ class ResourceActionTests(unittest.TestCase):
         self.assertIsNone(db.query(Resource).filter(Resource.id == resource_id).first())
         self.assertIsNone(db.query(ResourceBookmark).filter(ResourceBookmark.resource_id == resource_id).first())
         self.assertIsNone(db.query(LearningRecord).filter(LearningRecord.resource_id == resource_id).first())
+        db.close()
+
+    def test_legacy_path_never_binds_another_users_resource(self):
+        db = SessionLocal()
+        job = db.query(Job).filter(Job.job_title == "后端开发工程师").first()
+        foreign_id = str(uuid.uuid4())
+        foreign = User(id=foreign_id, username=f"foreign_{foreign_id[:8]}", password_hash="test")
+        db.add(foreign)
+        db.flush()
+        foreign_assessment = Assessment(user_id=foreign_id, job_id=job.id, overall_mastery=0.7)
+        db.add(foreign_assessment)
+        db.flush()
+        foreign_assessment_id = foreign_assessment.id
+        foreign_resource = Resource(
+            assessment_id=foreign_assessment.id,
+            knowledge_point="Redis 缓存",
+            content_type="讲义",
+            title="其他用户的 Redis 讲义",
+            body="介绍 Redis 缓存策略。",
+            source_chunk_id="foreign.redis",
+            source_text="Redis 可缓存数据。",
+            review_status="passed",
+            is_legacy=0,
+        )
+        path = LearningPath(
+            user_id=self.user_id,
+            job_id=job.id,
+            assessment_id=None,
+            steps=[{"step": 1, "knowledge_point": "Redis 缓存", "resource_type": "讲义", "estimated_time": 30}],
+            current_step=1,
+            status="active",
+        )
+        db.add_all([foreign_resource, path])
+        db.commit()
+        path_id = path.id
+        db.close()
+
+        response = self.client.get(f"/api/path/{self.user_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        returned = next(item for item in response.json() if item["id"] == path_id)
+        self.assertIsNone(returned["steps"][0]["resource_id"])
+
+        db = SessionLocal()
+        db.query(LearningPath).filter(LearningPath.id == path_id).delete(synchronize_session=False)
+        db.query(Resource).filter(Resource.assessment_id == foreign_assessment_id).delete(synchronize_session=False)
+        db.query(Assessment).filter(Assessment.id == foreign_assessment_id).delete(synchronize_session=False)
+        db.query(User).filter(User.id == foreign_id).delete(synchronize_session=False)
+        db.commit()
         db.close()
 
 

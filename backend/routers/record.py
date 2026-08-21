@@ -5,7 +5,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -27,8 +27,8 @@ class CreateRecordRequest(BaseModel):
 
 
 class CompleteRecordRequest(BaseModel):
-    score: float | None = None
-    time_spent: int | None = None  # 秒
+    score: float | None = Field(default=None, ge=0, le=100)
+    time_spent: int | None = Field(default=None, ge=0, le=31_536_000)  # 秒
 
 
 class RecordResponse(BaseModel):
@@ -49,8 +49,12 @@ def _get_owned_resource(resource_id: str, user_id: str, db: Session) -> Resource
     ).filter(
         Resource.id == resource_id,
         Assessment.user_id == user_id,
+        Resource.review_status.in_(["passed", "partial"]),
+        Resource.source_chunk_id.isnot(None),
+        Resource.source_text.isnot(None),
+        Resource.is_legacy == 0,
     ).first()
-    if not resource:
+    if not resource or resource.display_status != "show":
         raise HTTPException(status_code=404, detail="学习资源不存在")
     return resource
 
@@ -77,7 +81,13 @@ def create_record(
     ).first()
     if not learning_session:
         raise HTTPException(status_code=404, detail="学习会话不存在")
-    _get_owned_resource(request.resource_id, current_user.id, db)
+    resource = _get_owned_resource(request.resource_id, current_user.id, db)
+    assessment = db.query(Assessment).filter(
+        Assessment.id == resource.assessment_id,
+        Assessment.user_id == current_user.id,
+    ).first()
+    if not assessment or learning_session.job_id != assessment.job_id:
+        raise HTTPException(status_code=409, detail="学习会话与资源所属岗位不一致")
     existing = _latest_record(request.resource_id, current_user.id, db)
     if existing:
         return existing

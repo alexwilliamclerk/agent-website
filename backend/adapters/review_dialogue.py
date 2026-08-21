@@ -183,7 +183,7 @@ def review_turn(
         ready = True
 
     question = "" if ready else _clean_text(result.get("question"), 180)
-    if not question:
+    if not ready and not question:
         question = _fallback_question(missing, target_job)
     decision = "ready_for_diagnosis" if ready else "ask_followup"
     reason = _clean_text(result.get("reason"), 180) or (

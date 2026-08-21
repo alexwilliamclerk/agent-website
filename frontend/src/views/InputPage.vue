@@ -64,7 +64,7 @@
             <textarea v-model="userInput" :disabled="submitting || reviewSufficient" :placeholder="reviewSufficient ? '资料审查已完成，正在进入能力诊断…' : demoMode ? '请直接说明：你负责的模块、具体做法和验证结果…' : followupPending ? '请围绕上方 Agent 问题补充细节…' : '例如：我掌握了哪些技术，完成了哪些项目，目前哪些能力仍需补强…'" @focus="composerFocused = true" @blur="composerFocused = false"></textarea>
             <div class="composer-tools">
               <span class="composer-hint">{{ reviewSufficient ? '多轮资料已归档，正在传递给正式诊断流程' : demoMode ? '请只回答本轮问题，无需重复第一轮描述' : `第 ${Math.min(reviewTurnCount + 1, minimumReviewTurns)} 轮资料将作为能力证据` }}</span>
-              <div class="submit-group"><button v-if="canSkipFollowup && !reviewSufficient" class="skip-followup" type="button" :disabled="submitting" @click="skipFollowup">按当前资料继续</button><span>{{ userInput.length }} 字</span><button class="send-button primary-gradient-button" type="button" :disabled="submitting || reviewSufficient || !selectedJobId || userInput.trim().length < 10" @click="startReview()"><span>{{ submitting ? '审查中' : demoMode || followupPending ? '提交第 2 轮回答' : '发送并审查' }}</span><ArrowUp /></button></div>
+              <div class="submit-group"><button v-if="canSkipFollowup && !reviewSufficient" class="skip-followup" type="button" :disabled="submitting" @click="skipFollowup">按当前资料继续</button><button v-if="reviewSufficient && diagnosisLaunchError" class="skip-followup" type="button" :disabled="submitting" @click="retryFormalDiagnosis">重新启动诊断</button><span>{{ userInput.length }} 字</span><button class="send-button primary-gradient-button" type="button" :disabled="submitting || reviewSufficient || !selectedJobId || userInput.trim().length < 10" @click="startReview()"><span>{{ submitting ? '审查中' : demoMode || followupPending ? '提交第 2 轮回答' : '发送并审查' }}</span><ArrowUp /></button></div>
             </div>
           </div>
         </section>
@@ -134,6 +134,7 @@ const publicPreview = import.meta.env.DEV && import.meta.env.VITE_PUBLIC_PREVIEW
 const demoMode = computed(() => import.meta.env.DEV && route.query.demo === '1')
 const jobs = ref<JobInfo[]>([]); const jobLoading = ref(true); const jobError = ref(false); const selectedJobId = ref('')
 const userInput = ref(''); const reviewHint = ref(''); const reviewMissing = ref<string[]>([]); const reviewSufficient = ref(false)
+const diagnosisLaunchError = ref('')
 const submitting = ref(false); const assessmentId = ref(''); const reviewSessionId = ref(''); const reviewMessages = ref<ReviewMessage[]>([])
 const reviewTurnCount = ref(0); const minimumReviewTurns = ref(2); const followupPending = ref(false); const canSkipFollowup = ref(false)
 const restoringReview = ref(false)
@@ -275,6 +276,7 @@ async function restoreReviewSession() {
     reviewTurnCount.value = session.turn_count || 0
     minimumReviewTurns.value = Math.max(2, session.minimum_turns || 2)
     reviewSufficient.value = Boolean(session.ready_for_diagnosis)
+    diagnosisLaunchError.value = reviewSufficient.value && !session.assessment_id ? '上次正式诊断未完成，可直接重试。' : ''
     followupPending.value = !reviewSufficient.value && reviewTurnCount.value > 0
     canSkipFollowup.value = !reviewSufficient.value && reviewTurnCount.value >= 1
     reviewMissing.value = session.review_state?.missing || []
@@ -297,12 +299,13 @@ function recordDialogueTurn(content: string, result: Awaited<ReturnType<typeof s
   reviewTurnCount.value = result.turn_count
   minimumReviewTurns.value = result.minimum_turns
   reviewMissing.value = result.missing || []
-  reviewHint.value = result.reason || ''
+  reviewHint.value = result.question || ''
   reviewSufficient.value = result.ready_for_diagnosis
   followupPending.value = !result.ready_for_diagnosis
   canSkipFollowup.value = result.can_skip_followup
 }
 async function launchFormalDiagnosis() {
+  diagnosisLaunchError.value = ''
   liveProgress.value = { stage: 'material', agent: '资料解析 Agent', label: '多轮资料审查完成，正在创建正式诊断任务', percent: 8, status: 'running', updated_at: null, events: [] }
   const assessment = await createAssessment({ job_id: selectedJobId.value })
   assessmentId.value = assessment.id
@@ -317,6 +320,15 @@ async function launchFormalDiagnosis() {
   // The just-completed assessment is always the immediate navigation target.
   // The diagnosis page then confirms the server-side active pointer on load.
   await router.push(`/diagnosis/${assessment.id}`)
+}
+async function retryFormalDiagnosis() {
+  if (!reviewSufficient.value || submitting.value) return
+  submitting.value = true
+  try { await launchFormalDiagnosis() }
+  catch (error: any) {
+    diagnosisLaunchError.value = error?.response?.data?.detail || error?.message || '正式诊断启动失败'
+    ElMessage.error(diagnosisLaunchError.value)
+  } finally { submitting.value = false; stopProgressUpdates() }
 }
 async function startReview(forceFinish = false) {
   if (demoMode.value) {
@@ -349,7 +361,7 @@ async function startReview(forceFinish = false) {
     recordDialogueTurn(content, result)
     userInput.value = ''
     if (result.ready_for_diagnosis) await launchFormalDiagnosis()
-  } catch (error: any) { const message = error?.response?.data?.detail || error?.message || '审查任务启动失败，请稍后重试'; ElMessage.error(message); reviewHint.value = message } finally { submitting.value = false; stopProgressUpdates() }
+  } catch (error: any) { const message = error?.response?.data?.detail || error?.message || '审查任务启动失败，请稍后重试'; ElMessage.error(message); reviewHint.value = message; if (reviewSufficient.value) diagnosisLaunchError.value = message } finally { submitting.value = false; stopProgressUpdates() }
 }
 function skipFollowup() { void startReview(true) }
 watch(selectedJobId, (next, previous) => {

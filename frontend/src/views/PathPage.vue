@@ -108,8 +108,9 @@ const loadError = ref('')
 const jobTitleMap = ref<Record<string, string>>({})
 
 onMounted(async () => {
-  // 确保 userInfo 已加载
-  if (!store.userInfo && store.isLoggedIn) {
+  // The server-side active assessment is authoritative. Always refresh it so
+  // a newly completed diagnosis or a history selection is reflected here.
+  if (store.isLoggedIn) {
     try { await store.fetchUserInfo() } catch {}
   }
 
@@ -127,8 +128,13 @@ async function loadPaths() {
   loading.value = true
   loadError.value = ''
   try {
+    const assessmentId = store.currentAssessmentId
+    if (!assessmentId) {
+      paths.value = []
+      return
+    }
     const [list, jobs] = await Promise.all([
-      getLearningPaths(store.userInfo.id),
+      getLearningPaths(store.userInfo.id, assessmentId),
       getJobList(),
     ])
     paths.value = list
