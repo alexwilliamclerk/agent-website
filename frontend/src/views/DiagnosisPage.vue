@@ -48,7 +48,27 @@
                 <span class="core-separator" aria-hidden="true"></span>
                 <section class="radar-module">
                   <div class="core-module-heading"><span>能力雷达图</span><small>{{ assessment.ability_vector?.length || 0 }} DIMENSIONS</small></div>
-                  <div ref="radarRef" class="radar-chart"></div>
+                  <div class="radar-chart" role="img" :aria-label="`能力雷达图，共 ${radarDimensions.length} 个维度`">
+                    <svg viewBox="0 0 440 292" aria-hidden="true">
+                      <defs>
+                        <radialGradient id="radarFill" cx="50%" cy="45%" r="64%">
+                          <stop offset="0%" stop-color="#86e6ad" stop-opacity=".42" />
+                          <stop offset="64%" stop-color="#2fc177" stop-opacity=".25" />
+                          <stop offset="100%" stop-color="#07894e" stop-opacity=".12" />
+                        </radialGradient>
+                        <filter id="radarGlow" x="-30%" y="-30%" width="160%" height="160%">
+                          <feGaussianBlur stdDeviation="5" result="blur" />
+                        </filter>
+                      </defs>
+                      <polygon v-for="(points, index) in radarGridPolygons" :key="`grid-${index}`" :points="points" class="radar-grid" />
+                      <line v-for="axis in radarAxes" :key="`axis-${axis.index}`" :x1="radarCenter.x" :y1="radarCenter.y" :x2="axis.x" :y2="axis.y" class="radar-axis" />
+                      <polygon :points="radarDataPolygon" class="radar-data-glow" />
+                      <polygon :points="radarDataPolygon" class="radar-data-shape" />
+                      <circle v-for="point in radarDataPoints" :key="`point-${point.index}`" :cx="point.x" :cy="point.y" r="3.2" class="radar-point" />
+                      <circle :cx="radarCenter.x" :cy="radarCenter.y" r="4" class="radar-center-point" />
+                      <text v-for="label in radarLabels" :key="`label-${label.index}`" :x="label.x" :y="label.y" :text-anchor="label.anchor" dominant-baseline="middle" class="radar-label">{{ label.name }}</text>
+                    </svg>
+                  </div>
                 </section>
               </div>
               <div class="core-meta"><span>评估于 {{ formattedDate }}</span><span>{{ traceLabel }}</span><span class="core-status"><i></i>诊断完成</span><span v-if="demoMode" class="demo-badge">DEV 示例</span></div>
@@ -95,7 +115,7 @@ const route = useRoute(); const router = useRouter(); const store = useUserStore
 // Production builds always keep authentication and real API data enabled.
 const demoMode = computed(() => import.meta.env.DEV && route.query.demo === '1')
 const assessment = ref<AssessmentResponse | null>(null); const loading = ref(false); const loadError = ref(''); const progress = ref<AssessmentProgress>({ stage: 'material', agent: '资料解析 Agent', label: '正在解析学习情况', percent: 0, status: 'waiting', updated_at: null, events: [] }); const running = ref(false)
-const radarRef = ref<HTMLDivElement | null>(null); const scoreRef = ref<HTMLDivElement | null>(null); let chart: echarts.ECharts | null = null; let scoreChart: echarts.ECharts | null = null; let progressTimer: number | null = null; let progressStreamController: AbortController | null = null; let finishing = false
+const scoreRef = ref<HTMLDivElement | null>(null); let scoreChart: echarts.ECharts | null = null; let progressTimer: number | null = null; let progressStreamController: AbortController | null = null; let finishing = false
 let assessmentLoadSequence = 0
 const currentPath = ref<LearningPathInfo | null>(null); const pathLoading = ref(false); const resources = ref<ResourceInfo[]>([]); const traceSourceCount = ref(0)
 const calibrationSubmitting = ref(false)
@@ -110,6 +130,28 @@ const calibrationStatusText = computed(() => calibration.value?.mode === 'automa
 const resourceQualityText = computed(() => !resources.value.length ? '暂无可展示资源' : `${resources.value.filter(item => item.review_status === 'passed').length}/${resources.value.length} 已通过来源校验`)
 const traceLabel = computed(() => traceSourceCount.value ? `${traceSourceCount.value} 条依据` : '证据待加载')
 const agentSummary = computed(() => { const high = strengths.value.slice(0,2).map(item => item.name).join('、'); const low = [...(assessment.value?.ability_vector || [])].sort((a,b) => a.value - b.value)[0]?.name; if (!high && !low) return '本次诊断尚未形成完整的能力结论。'; return `你已具备较稳定的岗位基础，当前优势集中在${high || '已提交证据覆盖的能力'}。影响下一阶段竞争力的主要因素不是学习资源数量，而是${low || '复杂任务经验'}仍需补强。建议围绕能力缺口完成一次可验证的项目实践，并在复测后更新路径。` })
+const radarCenter = { x: 220, y: 145 }
+const radarRadius = 92
+const radarLabelRadius = 124
+const radarDimensions = computed(() => (assessment.value?.ability_vector || []).map((item, index) => ({
+  index,
+  name: item.name || `维度 ${index + 1}`,
+  value: Math.min(1, Math.max(0, Number.isFinite(Number(item.value)) ? Number(item.value) : 0)),
+})))
+function radarCoordinate(index: number, radius: number, total = Math.max(1, radarDimensions.value.length)) {
+  const angle = -Math.PI / 2 + index * Math.PI * 2 / total
+  return { x: radarCenter.x + Math.cos(angle) * radius, y: radarCenter.y + Math.sin(angle) * radius }
+}
+function pointsString(points: Array<{ x: number; y: number }>) { return points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ') }
+const radarAxes = computed(() => radarDimensions.value.map((item, index) => ({ ...radarCoordinate(index, radarRadius), index: item.index })))
+const radarGridPolygons = computed(() => [.2, .4, .6, .8, 1].map(level => pointsString(radarDimensions.value.map((_item, index) => radarCoordinate(index, radarRadius * level)))))
+const radarDataPoints = computed(() => radarDimensions.value.map((item, index) => ({ ...radarCoordinate(index, Math.max(3, radarRadius * item.value)), index: item.index })))
+const radarDataPolygon = computed(() => pointsString(radarDataPoints.value))
+const radarLabels = computed(() => radarDimensions.value.map((item, index) => {
+  const point = radarCoordinate(index, radarLabelRadius)
+  const deltaX = point.x - radarCenter.x
+  return { ...point, index: item.index, name: item.name, anchor: Math.abs(deltaX) < 12 ? 'middle' : deltaX > 0 ? 'start' : 'end' }
+}))
 const emptyDimensions = ['工程能力', '项目经验', '学习潜力', '基础能力', '软实力']
 const emptySteps: Array<{ icon: Component; title: string; detail: string }> = [
   { icon: DocumentChecked, title: '资料审查', detail: '提取学习与项目证据' },
@@ -121,11 +163,22 @@ const emptySteps: Array<{ icon: Component; title: string; detail: string }> = [
 const demoAssessment: AssessmentResponse = {
   id: 'demo-assessment', user_id: 'demo-user', job_id: 'demo-backend', user_input: '本地视觉验收示例', overall_mastery: .82, confidence: .94,
   ability_vector: [
-    { index: 0, name: '工程能力', value: .85, weight: 'high', category: 'engineering' },
-    { index: 1, name: '项目经验', value: .78, weight: 'high', category: 'project' },
-    { index: 2, name: '学习潜力', value: .88, weight: 'mid', category: 'learning' },
-    { index: 3, name: '基础能力', value: .74, weight: 'mid', category: 'foundation' },
-    { index: 4, name: '软实力', value: .80, weight: 'low', category: 'soft_skill' },
+    { index: 1, name: '编程基础', value: .85, weight: 'high', category: '通用基础' },
+    { index: 2, name: '数据结构与算法', value: .72, weight: 'high', category: '通用基础' },
+    { index: 3, name: '计算机网络', value: .78, weight: 'mid', category: '通用基础' },
+    { index: 4, name: '操作系统', value: .70, weight: 'mid', category: '通用基础' },
+    { index: 5, name: '前端技术', value: .58, weight: 'low', category: '专业方向' },
+    { index: 6, name: '后端技术', value: .88, weight: 'high', category: '专业方向' },
+    { index: 7, name: '数据库', value: .82, weight: 'high', category: '专业方向' },
+    { index: 8, name: '系统设计', value: .74, weight: 'high', category: '专业方向' },
+    { index: 9, name: '运维部署', value: .69, weight: 'mid', category: '专业方向' },
+    { index: 10, name: '测试与质量', value: .76, weight: 'mid', category: '专业方向' },
+    { index: 11, name: '产品分析', value: .55, weight: 'low', category: '专业方向' },
+    { index: 12, name: '项目管理', value: .80, weight: 'mid', category: '专业方向' },
+    { index: 13, name: '沟通表达', value: .77, weight: 'mid', category: '综合素质' },
+    { index: 14, name: '逻辑思维', value: .84, weight: 'high', category: '综合素质' },
+    { index: 15, name: '学习能力', value: .88, weight: 'mid', category: '综合素质' },
+    { index: 16, name: '安全规范', value: .73, weight: 'mid', category: '综合素质' },
   ],
   knowledge_gaps: ['复杂项目经验不足，缺少大型系统实践', '系统设计与架构思维需要加强', '高并发与分布式技术广度有待拓展'],
   gap_validation: [],
@@ -264,45 +317,7 @@ function renderScore() {
     ],
   })
 }
-function renderRadar() {
-  const dims = assessment.value?.ability_vector || []
-  if (!radarRef.value || !dims.length) return
-  chart?.dispose()
-  chart = echarts.init(radarRef.value, undefined, { renderer: 'svg' })
-  chart.setOption({
-    animationDuration: 900,
-    animationEasing: 'cubicOut',
-    tooltip: { trigger: 'item', formatter: (params: any) => `${params.name || '能力向量'}<br/>${params.value?.map((value: number, index: number) => `${dims[index]?.name} ${toPercent(value)}`).join('<br/>') || ''}` },
-    radar: {
-      center: ['50%', '54%'],
-      radius: '73%',
-      splitNumber: 5,
-      axisName: { color: 'rgba(35,76,53,.78)', fontSize: 10, fontWeight: 600 },
-      axisNameGap: 10,
-      splitArea: { areaStyle: { color: ['rgba(255,255,255,.01)', 'rgba(237,252,243,.055)', 'rgba(255,255,255,.012)', 'rgba(222,250,230,.055)', 'rgba(255,255,255,.01)'] } },
-      splitLine: { lineStyle: { color: ['rgba(5,118,66,.075)', 'rgba(5,118,66,.12)'], width: 1 } },
-      axisLine: { lineStyle: { color: 'rgba(5,118,66,.14)' } },
-      indicator: dims.map(item => ({ name: item.name, max: 1 })),
-    },
-    graphic: [{ type: 'circle', left: 'center', top: '53%', shape: { r: 4 }, style: { fill: 'rgba(255,255,255,.95)', shadowBlur: 12, shadowColor: 'rgba(21,182,101,.45)', stroke: 'rgba(21,155,86,.35)', lineWidth: 1 } }],
-    series: [
-      {
-        type: 'radar', symbol: 'none', silent: true,
-        lineStyle: { color: 'rgba(37,199,113,.12)', width: 8, shadowBlur: 18, shadowColor: 'rgba(35,190,108,.18)' },
-        areaStyle: { color: 'rgba(72,213,133,.055)' },
-        data: [{ value: dims.map(item => item.value), name: '能力得分光层' }],
-      },
-      {
-        type: 'radar', symbol: 'circle', symbolSize: 5,
-        lineStyle: { color: 'rgba(5,139,76,.92)', width: 2.2, shadowBlur: 7, shadowColor: 'rgba(34,181,107,.16)' },
-        itemStyle: { color: '#12aa61', borderColor: 'rgba(255,255,255,.96)', borderWidth: 1.4, shadowBlur: 8, shadowColor: 'rgba(34,181,107,.2)' },
-        areaStyle: { color: new echarts.graphic.RadialGradient(.5, .46, .72, [{ offset: 0, color: 'rgba(116,226,158,.3)' }, { offset: .58, color: 'rgba(49,190,112,.2)' }, { offset: 1, color: 'rgba(10,139,76,.09)' }]) },
-        data: [{ value: dims.map(item => item.value), name: '能力得分' }],
-      },
-    ],
-  })
-}
-function renderVisuals() { renderScore(); renderRadar(); requestAnimationFrame(() => { chart?.resize(); scoreChart?.resize() }) }
+function renderVisuals() { renderScore(); requestAnimationFrame(() => scoreChart?.resize()) }
 async function runAutomaticCalibration() {
   if (!assessment.value || demoMode.value || calibrationSubmitting.value) return
   calibrationSubmitting.value = true
@@ -315,10 +330,10 @@ async function runAutomaticCalibration() {
     ElMessage.error(error?.response?.data?.detail || '自动校准失败')
   } finally { calibrationSubmitting.value = false }
 }
-function handleResize() { chart?.resize(); scoreChart?.resize() }
+function handleResize() { scoreChart?.resize() }
 const chartResizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => handleResize())
-watch(radarRef, (element, previous) => { if (previous) chartResizeObserver?.unobserve(previous); if (element) chartResizeObserver?.observe(element) })
-watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scoreChart?.dispose(); chart = null; scoreChart = null; loadAssessment() }, { immediate: true }); window.addEventListener('resize', handleResize); onBeforeUnmount(() => { stopProgressUpdates(); chartResizeObserver?.disconnect(); chart?.dispose(); scoreChart?.dispose(); window.removeEventListener('resize', handleResize) })
+watch(scoreRef, (element, previous) => { if (previous) chartResizeObserver?.unobserve(previous); if (element) chartResizeObserver?.observe(element) })
+watch(() => [assessmentId.value, demoMode.value], () => { scoreChart?.dispose(); scoreChart = null; loadAssessment() }, { immediate: true }); window.addEventListener('resize', handleResize); onBeforeUnmount(() => { stopProgressUpdates(); chartResizeObserver?.disconnect(); scoreChart?.dispose(); window.removeEventListener('resize', handleResize) })
 </script>
 
 <style scoped>
@@ -672,6 +687,15 @@ watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scor
   background: radial-gradient(circle, rgba(255,255,255,.11), rgba(178,241,202,.025) 50%, transparent 72%);
   filter: drop-shadow(0 12px 22px rgba(23,139,74,.055));
 }
+.radar-chart svg { width: 100%; height: 100%; overflow: visible; }
+.radar-grid { fill: rgba(236,253,243,.025); stroke: rgba(7,123,69,.14); stroke-width: 1; }
+.radar-grid:nth-of-type(even) { fill: rgba(202,247,220,.035); stroke-opacity: .75; }
+.radar-axis { stroke: rgba(7,123,69,.14); stroke-width: 1; }
+.radar-data-glow { fill: rgba(55,207,123,.16); stroke: rgba(38,194,108,.2); stroke-width: 9; filter: url(#radarGlow); }
+.radar-data-shape { fill: url(#radarFill); stroke: rgba(4,137,75,.92); stroke-width: 2.2; stroke-linejoin: round; }
+.radar-point { fill: #14ad62; stroke: rgba(255,255,255,.98); stroke-width: 1.4; filter: drop-shadow(0 2px 4px rgba(12,133,72,.2)); }
+.radar-center-point { fill: rgba(255,255,255,.98); stroke: rgba(16,155,84,.38); stroke-width: 1.2; filter: drop-shadow(0 0 6px rgba(27,190,101,.42)); }
+.radar-label { fill: rgba(26,67,43,.77); font-size: 8.6px; font-weight: 700; letter-spacing: 0; }
 .core-meta {
   min-height: 31px;
   margin-top: 5px;

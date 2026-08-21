@@ -42,7 +42,7 @@
               <div v-if="!demoReplySent" class="message agent-message continuation guided-followup">
                 <span class="message-avatar"><Cpu /></span>
                 <div class="bubble review-feedback">
-                  <span class="turn-badge">第 2 轮 · Agent 定向追问</span>
+                  <span class="turn-badge">第 {{ nextReviewTurn }} 轮 · Agent 定向追问</span>
                   <b>我已识别到项目经历，但还缺少可核验的个人贡献证据。</b>
                   <p>第一轮资料已确认你使用过 Vue、JavaScript 与接口联调；本轮不需要重复技术清单，只需补全一个关键事实。</p>
                   <div class="guided-question"><span>请直接回答</span><strong>{{ previewFollowupQuestion }}</strong></div>
@@ -60,11 +60,11 @@
           </div>
 
           <div class="composer" :class="{ focused: composerFocused, 'followup-composer': followupPending || (demoMode && !demoReplySent) }">
-            <div v-if="(followupPending && reviewHint) || (demoMode && !demoReplySent)" class="composer-question"><span>第 2 轮 · 请回答 Agent 问题</span><b>{{ demoMode ? previewFollowupQuestion : reviewHint }}</b></div>
+            <div v-if="(followupPending && reviewHint) || (demoMode && !demoReplySent)" class="composer-question"><span>第 {{ nextReviewTurn }} 轮 · 请回答 Agent 问题</span><b>{{ demoMode ? previewFollowupQuestion : reviewHint }}</b></div>
             <textarea v-model="userInput" :disabled="submitting || reviewSufficient" :placeholder="reviewSufficient ? '资料审查已完成，正在进入能力诊断…' : demoMode ? '请直接说明：你负责的模块、具体做法和验证结果…' : followupPending ? '请围绕上方 Agent 问题补充细节…' : '例如：我掌握了哪些技术，完成了哪些项目，目前哪些能力仍需补强…'" @focus="composerFocused = true" @blur="composerFocused = false"></textarea>
             <div class="composer-tools">
-              <span class="composer-hint">{{ reviewSufficient ? '多轮资料已归档，正在传递给正式诊断流程' : demoMode ? '请只回答本轮问题，无需重复第一轮描述' : `第 ${Math.min(reviewTurnCount + 1, minimumReviewTurns)} 轮资料将作为能力证据` }}</span>
-              <div class="submit-group"><button v-if="canSkipFollowup && !reviewSufficient" class="skip-followup" type="button" :disabled="submitting" @click="skipFollowup">按当前资料继续</button><button v-if="reviewSufficient && diagnosisLaunchError" class="skip-followup" type="button" :disabled="submitting" @click="retryFormalDiagnosis">重新启动诊断</button><span>{{ userInput.length }} 字</span><button class="send-button primary-gradient-button" type="button" :disabled="submitting || reviewSufficient || !selectedJobId || userInput.trim().length < 10" @click="startReview()"><span>{{ submitting ? '审查中' : demoMode || followupPending ? '提交第 2 轮回答' : '发送并审查' }}</span><ArrowUp /></button></div>
+              <span class="composer-hint">{{ reviewSufficient ? '多轮资料已归档，正在传递给正式诊断流程' : demoMode ? `请回答第 ${nextReviewTurn} 轮问题，无需重复之前描述` : `第 ${nextReviewTurn} 轮资料将作为能力证据` }}</span>
+              <div class="submit-group"><button v-if="canSkipFollowup && !reviewSufficient" class="skip-followup" type="button" :disabled="submitting" @click="skipFollowup">按当前资料继续</button><button v-if="reviewSufficient && diagnosisLaunchError" class="skip-followup" type="button" :disabled="submitting" @click="retryFormalDiagnosis">重新启动诊断</button><span>{{ userInput.length }} 字</span><button class="send-button primary-gradient-button" type="button" :disabled="submitting || reviewSufficient || !selectedJobId || userInput.trim().length < 10" @click="startReview()"><span>{{ reviewSubmitLabel }}</span><ArrowUp /></button></div>
             </div>
           </div>
         </section>
@@ -125,7 +125,7 @@ import {
 import { ElMessage } from 'element-plus'
 import { getJobList, type JobInfo } from '@/api/jobs'
 import { previewJobs } from '@/fixtures/previewJobs'
-import { createAssessment, getAssessmentProgress, streamAssessmentProgress, submitAssessment, type AssessmentProgress } from '@/api/assessment'
+import { createAssessment, submitAssessment, type AssessmentProgress } from '@/api/assessment'
 import { createSession, getReviewSession, getSessionMessages, submitReviewTurn, type ReviewMessage } from '@/api/session'
 import { useUserStore } from '@/stores/user'
 
@@ -135,17 +135,23 @@ const demoMode = computed(() => import.meta.env.DEV && route.query.demo === '1')
 const jobs = ref<JobInfo[]>([]); const jobLoading = ref(true); const jobError = ref(false); const selectedJobId = ref('')
 const userInput = ref(''); const reviewHint = ref(''); const reviewMissing = ref<string[]>([]); const reviewSufficient = ref(false)
 const diagnosisLaunchError = ref('')
-const submitting = ref(false); const assessmentId = ref(''); const reviewSessionId = ref(''); const reviewMessages = ref<ReviewMessage[]>([])
+const submitting = ref(false); const reviewSessionId = ref(''); const reviewMessages = ref<ReviewMessage[]>([])
 const reviewTurnCount = ref(0); const minimumReviewTurns = ref(2); const followupPending = ref(false); const canSkipFollowup = ref(false)
 const restoringReview = ref(false)
 const liveProgress = ref<AssessmentProgress>({ stage: 'material', agent: '资料解析 Agent', label: '等待开始', percent: 0, status: 'waiting', updated_at: null, events: [] })
-let progressTimer: number | null = null; let progressPolling = false; let progressStreamController: AbortController | null = null
 const composerFocused = ref(false); const showPipeline = ref(false); const jobPickerOpen = ref(false); const jobPickerRef = ref<HTMLElement | null>(null)
 const previewUserInput = '我做过一个电商平台前端项目，负责商品列表、购物车和订单页面，使用 Vue、JavaScript 和接口联调。熟悉 Git 协作，但对性能优化和工程化部署还不够熟悉。'
 const previewFollowupQuestion = '在该电商项目中，你亲自负责了哪个模块？请说明你如何完成接口联调或性能优化，并给出一个可验证的结果。'
 const previewReply = ref('我主要负责商品列表和购物车模块。我通过封装请求层完成商品、库存与购物车接口联调，并用路由懒加载和图片压缩减少首屏等待；联调后用浏览器 Network 面板核对接口状态和页面加载结果。')
 const demoReplySent = ref(false)
 const selectedJob = computed(() => jobs.value.find(job => job.id === selectedJobId.value) || null)
+const nextReviewTurn = computed(() => Math.max(1, reviewTurnCount.value + 1))
+const reviewSubmitLabel = computed(() => {
+  if (submitting.value) return '审查中'
+  if (reviewSufficient.value) return '资料审查已完成'
+  if (demoMode.value || followupPending.value) return `提交第 ${nextReviewTurn.value} 轮回答`
+  return '发送并审查'
+})
 const accumulatedReviewText = computed(() => [...reviewMessages.value.filter(message => message.role === 'user').map(message => message.content), userInput.value].join(' '))
 const evidenceKeywordCount = computed(() => demoMode.value ? 6 : [...new Set(['项目', '实践', '开发', '学习', '掌握', '接口', '数据库', '前端', '后端', '部署', '测试', '协作'].filter(word => accumulatedReviewText.value.includes(word)))].length)
 const evidencePercent = computed(() => {
@@ -224,34 +230,6 @@ function resetConversation() {
 function selectJob(jobId: string) { selectedJobId.value = jobId; jobPickerOpen.value = false }
 function closeJobPicker(event: PointerEvent) { if (jobPickerRef.value && !jobPickerRef.value.contains(event.target as Node)) jobPickerOpen.value = false }
 function agentStatusText(status: string) { return { idle: '待开始', waiting: '等待中', running: '运行中', completed: '已完成', failed: '失败', blocked: '已拦截' }[status] || '等待中' }
-async function pollProgress() { if (!assessmentId.value || progressPolling) return; progressPolling = true; try { liveProgress.value = await getAssessmentProgress(assessmentId.value) } catch { /* keep the latest verified progress */ } finally { progressPolling = false } }
-function startPolling() { stopPolling(); pollProgress(); progressTimer = window.setInterval(pollProgress, 900) }
-function stopPolling() { if (progressTimer !== null) { window.clearInterval(progressTimer); progressTimer = null } }
-function startProgressUpdates() {
-  stopProgressUpdates()
-  if (!assessmentId.value) return
-  const controller = new AbortController()
-  progressStreamController = controller
-  void streamAssessmentProgress(assessmentId.value, snapshot => {
-    liveProgress.value = snapshot
-  }, controller.signal).catch(() => {
-    if (!controller.signal.aborted) startPolling()
-  })
-}
-function stopProgressUpdates() {
-  progressStreamController?.abort()
-  progressStreamController = null
-  stopPolling()
-}
-async function waitForCompletion() {
-  const deadline = Date.now() + 15 * 60 * 1000
-  while (Date.now() < deadline) {
-    if (liveProgress.value.status === 'failed') throw new Error(liveProgress.value.label || '诊断任务执行失败')
-    if (liveProgress.value.percent >= 100 || liveProgress.value.status === 'completed') return
-    await new Promise(resolve => window.setTimeout(resolve, 320))
-  }
-  throw new Error('诊断任务超过等待时间，请稍后进入能力诊断页查看状态')
-}
 async function ensureReviewSession() {
   if (reviewSessionId.value) return reviewSessionId.value
   const session = await createSession({ job_id: selectedJobId.value, minimum_turns: 2 })
@@ -264,7 +242,12 @@ async function restoreReviewSession() {
   if (!sessionId || demoMode.value || !store.isLoggedIn) return
   try {
     const session = await getReviewSession(sessionId)
-    if (session.status === 'completed' || session.assessment_id) {
+    if (session.assessment_id) {
+      store.setCurrentSession(null)
+      await router.replace(`/diagnosis/${session.assessment_id}`)
+      return
+    }
+    if (session.status === 'completed') {
       store.setCurrentSession(null)
       return
     }
@@ -308,18 +291,14 @@ async function launchFormalDiagnosis() {
   diagnosisLaunchError.value = ''
   liveProgress.value = { stage: 'material', agent: '资料解析 Agent', label: '多轮资料审查完成，正在创建正式诊断任务', percent: 8, status: 'running', updated_at: null, events: [] }
   const assessment = await createAssessment({ job_id: selectedJobId.value })
-  assessmentId.value = assessment.id
-  startProgressUpdates()
   await submitAssessment(assessment.id, {
     user_input: '多轮资料审查会话已提供能力证据。',
     session_id: reviewSessionId.value,
   })
-  await waitForCompletion()
-  liveProgress.value = { ...liveProgress.value, stage: 'complete', agent: '协同调度器', label: '审查完成', percent: 100, status: 'completed' }
-  await store.fetchUserInfo().catch(() => undefined)
-  // The just-completed assessment is always the immediate navigation target.
-  // The diagnosis page then confirms the server-side active pointer on load.
+  // Submission only queues the long-running Agent workflow. Navigate at once:
+  // DiagnosisPage owns SSE + polling and renders the real execution progress.
   await router.push(`/diagnosis/${assessment.id}`)
+  store.setCurrentSession(null)
 }
 async function retryFormalDiagnosis() {
   if (!reviewSufficient.value || submitting.value) return
@@ -328,7 +307,7 @@ async function retryFormalDiagnosis() {
   catch (error: any) {
     diagnosisLaunchError.value = error?.response?.data?.detail || error?.message || '正式诊断启动失败'
     ElMessage.error(diagnosisLaunchError.value)
-  } finally { submitting.value = false; stopProgressUpdates() }
+  } finally { submitting.value = false }
 }
 async function startReview(forceFinish = false) {
   if (demoMode.value) {
@@ -361,7 +340,7 @@ async function startReview(forceFinish = false) {
     recordDialogueTurn(content, result)
     userInput.value = ''
     if (result.ready_for_diagnosis) await launchFormalDiagnosis()
-  } catch (error: any) { const message = error?.response?.data?.detail || error?.message || '审查任务启动失败，请稍后重试'; ElMessage.error(message); reviewHint.value = message; if (reviewSufficient.value) diagnosisLaunchError.value = message } finally { submitting.value = false; stopProgressUpdates() }
+  } catch (error: any) { const message = error?.response?.data?.detail || error?.message || '审查任务启动失败，请稍后重试'; ElMessage.error(message); reviewHint.value = message; if (reviewSufficient.value) diagnosisLaunchError.value = message } finally { submitting.value = false }
 }
 function skipFollowup() { void startReview(true) }
 watch(selectedJobId, (next, previous) => {
@@ -372,7 +351,6 @@ onMounted(() => {
   document.addEventListener('pointerdown', closeJobPicker)
 })
 onBeforeUnmount(() => {
-  stopProgressUpdates()
   document.removeEventListener('pointerdown', closeJobPicker)
 })
 </script>

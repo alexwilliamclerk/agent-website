@@ -197,13 +197,16 @@ def _review_session_context(
             SessionMessage.role == "user",
         )
         .order_by(SessionMessage.created_at.asc(), SessionMessage.id.asc())
-        .limit(8)
         .all()
     )
     if len(user_turns) < max(2, int(review_session.minimum_turns or 2)):
         raise HTTPException(status_code=409, detail="资料审查轮次不足，无法进入正式诊断")
+    # Every learner turn participates in diagnosis. To keep model context
+    # bounded for long conversations, distribute a fixed text budget across
+    # all turns instead of silently dropping everything after turn eight.
+    per_turn_chars = max(240, min(1800, 12000 // max(1, len(user_turns))))
     turns_text = "\n".join(
-        f"【第{row.turn_index}轮学习者描述】\n{(row.content or '').strip()[:1800]}"
+        f"【第{row.turn_index}轮学习者描述】\n{(row.content or '').strip()[:per_turn_chars]}"
         for row in user_turns
         if (row.content or "").strip()
     )
@@ -581,7 +584,7 @@ def _run_assessment(
                     if skill.lower() in knowledge_point.lower() or any(keyword.lower() in knowledge_point.lower() for keyword in skill.lower().split()):
                         covered_dimensions.add(dimension)
                         break
-        low_dimensions = [item["name"] for item in diagnosis["ability_vector"] if item["value"] < 0.6]
+        low_dimensions = [item["name"] for item in diagnosis["ability_vector"] if item["value"] < 0.55]
         missing_dimensions = [dimension for dimension in low_dimensions if dimension not in covered_dimensions]
         if missing_dimensions:
             print(f"[CHECK] 低分维度缺失: {missing_dimensions}，自动补资源", flush=True)

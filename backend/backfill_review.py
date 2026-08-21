@@ -20,7 +20,7 @@ from adapters import vector_adapter
 VERDICT_TO_STATUS = {"grounded": "passed", "partial": "partial", "ungrounded": "blocked"}
 
 # 检索最高分低于该阈值 → 视为「无可靠匹配来源」，标 blocked，禁止进入资料库。
-SCORE_THRESHOLD = 0.60
+SCORE_THRESHOLD = 0.55
 
 
 def _verify(source_text: str, body: str) -> tuple[str, str]:

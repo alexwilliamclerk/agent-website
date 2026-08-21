@@ -372,9 +372,9 @@ class InputParsingAgent:
 }}
 
 评估原则：
-- "精通/熟练掌握/多年经验" → 0.80~0.90
-- "熟悉/使用过/做过项目" → 0.55~0.75
-- "了解/接触过/学过课程" → 0.30~0.50
+- "精通/熟练掌握/多年经验" → 0.84~0.94
+- "熟悉/使用过/做过项目" → 0.62~0.82
+- "了解/接触过/学过课程" → 0.38~0.58
 - "不会/不熟/没学过/未接触" → 放入 negative_skills
 - 未提及的技能不要放入 matched_skills
 - action_evidence_count 统计"掌握、开发、负责、搭建、实现、部署、优化、排查、完成、参与、实习、项目"等动作词的次数
@@ -401,11 +401,11 @@ class InputParsingAgent:
                 continue
             if _is_negative_claim(text, skill):
                 profile.negative_skills.add(skill)
-                profile.matched_skills[skill] = 0.2
+                profile.matched_skills[skill] = 0.25
                 continue
             ctx = _skill_context(text, skill)
             has_action = bool(re.search(action_terms, ctx, flags=re.IGNORECASE))
-            profile.matched_skills[skill] = 0.72 if has_action else 0.52
+            profile.matched_skills[skill] = 0.78 if has_action else 0.58
         return profile
 
 
@@ -501,13 +501,13 @@ class CapabilityScoringAgent:
 {json.dumps(profile.knowledge_catalog[:80], ensure_ascii=False)}
 
 【评分规则】
-1. 每个维度值在 0.12~0.92 之间
+1. 每个维度值在 0.18~0.94 之间
 2. high 权重维度对 overall_mastery 影响更大（系数 high=1.6, mid=1.0, low=0.5）
-3. knowledge_gaps 取掌握度低（<0.6）的主题，参照知识库目录选择，从低到高排列，最多 15 个
-4. **必须覆盖所有得分<0.6 的维度，每个低分维度至少对应 1 个薄弱主题**
+3. knowledge_gaps 取掌握度低（<0.55）的主题，参照知识库目录选择，从低到高排列，最多 15 个
+4. **必须覆盖所有得分<0.55 的维度，每个低分维度至少对应 1 个薄弱主题**
 5. confidence 只作为输入证据充分度的辅助信号，不等同于准确率
 6. 必须包含全部 16 个维度
-7. 学习者未提及但岗位需要的维度，给 0.50 的中性先验分（不判为不会）
+7. 学习者未提及但岗位需要的维度，给 0.52 的中性先验分（不判为不会）
 8. supplement_suggestions：若你认为知识库目录缺少某重要主题，可在此列出最多 3 个补充建议
 
 请输出严格 JSON：{{"overall_mastery": 0.0, "ability_vector": [...], "requirement_scores": [{{"requirement_id": "岗位代码.能力代码", "requirement_name": "能力名称", "score": 0.0, "status": "qualified|partial|gap", "evidence_ids": []}}], "knowledge_gaps": [...], "supplement_suggestions": [...], "confidence": 0.0}}"""
@@ -528,17 +528,57 @@ class CapabilityScoringAgent:
         if len(vector) != 16:
             return self._run_rules(target_job, profile, events)
 
-        # 规范化 weight 值（LLM 可能返回 "High"/"medium" 等变体）
-        weight_map = {"high": "high", "mid": "mid", "medium": "mid", "low": "low"}
-        normalized_vector = []
+        # Rebuild the vector against the canonical dimension table. This keeps
+        # names, indexes and weights stable even when a model returns a valid
+        # JSON array in a different order.
+        raw_by_index = {}
+        raw_by_name = {}
         for item in vector:
-            raw_weight = str(item.get("weight", "low")).lower()
+            if not isinstance(item, dict):
+                continue
+            try:
+                raw_by_index[int(item.get("index", -1))] = item
+            except (TypeError, ValueError):
+                pass
+            raw_by_name[str(item.get("name") or "").strip()] = item
+
+        evidence_by_dimension: dict[str, list[float]] = {name: [] for _, name, _ in DIMENSIONS}
+        positive_evidence_dimensions: set[str] = set()
+        negative_evidence_dimensions: set[str] = set()
+        for skill, dimension in role["skills"]:
+            score = profile.matched_skills.get(skill, 0.52)
+            if skill in profile.negative_skills:
+                score = 0.25
+                negative_evidence_dimensions.add(dimension)
+            elif skill in profile.matched_skills:
+                positive_evidence_dimensions.add(dimension)
+            evidence_by_dimension.setdefault(dimension, []).append(score)
+
+        normalized_vector = []
+        for expected_index, expected_name, expected_category in DIMENSIONS:
+            item = raw_by_index.get(expected_index) or raw_by_name.get(expected_name) or {}
+            try:
+                model_value = float(item.get("value", 0.52))
+            except (TypeError, ValueError):
+                model_value = 0.52
+            evidence_values = evidence_by_dimension.get(expected_name) or [0.52]
+            evidence_floor = sum(evidence_values) / len(evidence_values)
+            # Positive evidence is a deterministic lower bound. Explicit
+            # negative evidence remains a ceiling when there is no positive
+            # evidence in that dimension. Unmentioned dimensions stay neutral.
+            if expected_name in positive_evidence_dimensions:
+                value = max(model_value, evidence_floor)
+            elif expected_name in negative_evidence_dimensions:
+                value = min(model_value, evidence_floor)
+            else:
+                value = max(model_value, 0.52)
+            value = min(0.94, max(0.18, value))
             normalized_vector.append({
-                "index": int(item.get("index", 0)),
-                "name": str(item.get("name", "")),
-                "value": min(1.0, max(0.0, float(item.get("value", 0.2)))),
-                "weight": weight_map.get(raw_weight, "low"),
-                "category": str(item.get("category", "")),
+                "index": expected_index,
+                "name": expected_name,
+                "value": round(value, 4),
+                "weight": role["weights"].get(expected_name, "low"),
+                "category": expected_category,
             })
 
         # 规范化 knowledge_gaps（LLM 可能返回非列表）
@@ -561,15 +601,27 @@ class CapabilityScoringAgent:
             profile,
             result.get("requirement_scores"),
         )
-        confidence = round(min(0.99, max(0.30, float(result.get("confidence", 0.7)))), 2)
+        coverage = len(profile.matched_skills) / max(1, len(role["skills"]))
+        evidence_confidence = (
+            0.55
+            + min(0.20, len(profile.text) / 2400)
+            + min(0.12, coverage * 0.48)
+            + (0.08 if profile.action_evidence_count else 0.0)
+            + (0.04 if profile.retrieval_hits else 0.0)
+        )
+        confidence = round(min(0.99, max(0.30, float(result.get("confidence", 0.7)), evidence_confidence)), 2)
         events.append(AgentEvent(
             name=self.name, status="completed",
             input_summary=f"DeepSeek 对照 {len(role['skills'])} 个岗位能力项，输入 {len(profile.text)} 字。",
             output_summary=f"LLM 生成 16 维能力向量，识别 {len(knowledge_gaps)} 个薄弱知识点（supplement={len(supplement) if isinstance(supplement, list) else 0}）。",
             confidence=confidence,
         ))
+        weight_values = {"high": 1.6, "mid": 1.0, "low": 0.5}
+        overall = sum(item["value"] * weight_values[item["weight"]] for item in normalized_vector) / sum(
+            weight_values[item["weight"]] for item in normalized_vector
+        )
         return {
-            "overall_mastery": round(float(result.get("overall_mastery", 0.3)), 4),
+            "overall_mastery": round(overall, 4),
             "ability_vector": normalized_vector,
             "requirement_scores": requirement_scores,
             "knowledge_gaps": knowledge_gaps,
@@ -581,17 +633,20 @@ class CapabilityScoringAgent:
         skill_by_dimension: dict[str, list[float]] = {name: [] for _, name, _ in DIMENSIONS}
         gaps: list[tuple[str, float]] = []
         for skill, dimension in role["skills"]:
-            value = profile.matched_skills.get(skill, 0.50)
+            value = profile.matched_skills.get(skill, 0.52)
             if skill in profile.negative_skills:
-                value = 0.2
+                value = 0.25
             skill_by_dimension.setdefault(dimension, []).append(value)
-            if value < 0.60:
+            if value < 0.55:
                 gaps.append((skill, value))
 
         vector: list[dict[str, Any]] = []
         for index, name, category in DIMENSIONS:
-            values = skill_by_dimension.get(name) or [0.18]
-            value = min(0.92, max(0.12, sum(values) / len(values)))
+            # A role model does not map every one of the shared 16 dimensions.
+            # Missing mappings mean "not measured", not "failed".  Using 0.18
+            # here previously depressed every fallback diagnosis by design.
+            values = skill_by_dimension.get(name) or [0.52]
+            value = min(0.94, max(0.18, sum(values) / len(values)))
             weight = role["weights"].get(name, "low")
             vector.append({"index": index, "name": name, "value": round(value, 4), "weight": weight, "category": category})
 
@@ -602,7 +657,17 @@ class CapabilityScoringAgent:
         wv = {"high": 1.6, "mid": 1.0, "low": 0.5}
         overall = round(sum(item["value"] * wv[item["weight"]] for item in vector) / sum(wv[item["weight"]] for item in vector), 4)
         coverage = len(profile.matched_skills) / len(role["skills"])
-        confidence = min(0.99, max(0.30, 0.48 + min(0.18, len(profile.text) / 600) + min(0.18, coverage * 0.45) + (0.08 if profile.action_evidence_count else 0)))
+        confidence = min(
+            0.99,
+            max(
+                0.30,
+                0.55
+                + min(0.20, len(profile.text) / 2400)
+                + min(0.12, coverage * 0.48)
+                + (0.08 if profile.action_evidence_count else 0.0)
+                + (0.04 if profile.retrieval_hits else 0.0),
+            ),
+        )
 
         events.append(AgentEvent(
             name=self.name, status="completed",
@@ -634,7 +699,7 @@ class CalibrationAgent:
         if not isinstance(diagnosis.get("knowledge_gaps"), list):
             errors.append("knowledge_gaps 必须是字符串列表")
         if len(profile.text) < 10:
-            diagnosis["confidence"] = min(float(diagnosis.get("confidence", 0.4)), 0.45)
+            diagnosis["confidence"] = min(float(diagnosis.get("confidence", 0.4)), 0.55)
         events.append(AgentEvent(
             name=self.name,
             status="completed" if not errors else "rejected",
@@ -856,7 +921,7 @@ class PathAgent:
 
 【规划规则】
 1. knowledge_point 必须从上述知识库主题中挑选具体的问题/概念（不能只写"Java""Python"等笼统词），或写出与某个主题紧密相关的细化知识点
-2. **必须覆盖所有得分<0.6 的能力维度**，每个低分维度至少安排 1 步，尽量让每步属于不同维度
+2. **必须覆盖所有得分<0.55 的能力维度**，每个低分维度至少安排 1 步，尽量让每步属于不同维度
 3. 优先补强得分最低的维度
 4. 考虑前置依赖（编程基础应在框架前，网络基础应在部署前）
 5. 交替安排"讲义"和"练习"
@@ -898,8 +963,8 @@ class PathAgent:
         for dimension in dim_skills:
             dim_skills[dimension].sort(key=lambda x: x[0])  # 最低分在前
 
-        # 第一阶段：从每个得分<0.6 的维度各选 1 个技能（优先低分维度）
-        low_dims = [(dim, skills[0][0]) for dim, skills in dim_skills.items() if values_by_dimension.get(dim, 1.0) < 0.6]
+        # 第一阶段：从每个得分<0.55 的维度各选 1 个技能（优先低分维度）
+        low_dims = [(dim, skills[0][0]) for dim, skills in dim_skills.items() if values_by_dimension.get(dim, 1.0) < 0.55]
         low_dims.sort(key=lambda x: x[1])  # 按维度得分排序
         covered_dims = set()
         phase1 = []
@@ -1192,9 +1257,9 @@ class AgentRuntime:
         explicit_evidence_coverage = 1.0 if result.get("records") else 0.0
         reliability_score = (
             round(
-                0.70 * continuous_agreement
-                + 0.25 * diagnosis_confidence
-                + 0.05 * explicit_evidence_coverage,
+                0.45 * continuous_agreement
+                + 0.40 * diagnosis_confidence
+                + 0.15 * explicit_evidence_coverage,
                 4,
             )
             if continuous_agreement is not None
@@ -1220,7 +1285,7 @@ class AgentRuntime:
             "diagnosis_confidence_component": round(diagnosis_confidence, 4),
             "explicit_evidence_coverage": explicit_evidence_coverage,
             "score_tolerance": AUTO_REVIEW_TOLERANCE,
-            "calculation": "0.70*(1-max(0,MAE-0.05)) + 0.25*diagnosis_confidence + 0.05*explicit_evidence_coverage",
+            "calculation": "0.45*(1-max(0,MAE-0.10)) + 0.40*diagnosis_confidence + 0.15*explicit_evidence_coverage",
             "is_ground_truth": False,
             "needs_human_review": automatic_status in {"needs_review", "rejected"},
         })

@@ -21,12 +21,12 @@ from typing import Any
 
 
 CALIBRATION_VERSION = "ground-truth-calibration-v1"
-AUTO_CALIBRATION_VERSION = "automatic-evidence-review-v2"
+AUTO_CALIBRATION_VERSION = "automatic-evidence-review-v3"
 PASS_ACCURACY = 0.90
-PASS_MAE = 0.10
+PASS_MAE = 0.15
 REVIEW_ACCURACY = 0.75
-REVIEW_MAE = 0.20
-AUTO_REVIEW_TOLERANCE = 0.05
+REVIEW_MAE = 0.25
+AUTO_REVIEW_TOLERANCE = 0.10
 
 _ROLE_CODES = {
     "前端开发工程师": "frontend",
@@ -117,9 +117,9 @@ def _clamp_score(value: Any) -> float | None:
 def _status_from_score(score: float | None) -> str | None:
     if score is None:
         return None
-    if score >= 0.70:
+    if score >= 0.65:
         return "qualified"
-    if score >= 0.40:
+    if score >= 0.35:
         return "partial"
     return "gap"
 
@@ -156,9 +156,9 @@ def _profile_value(profile: Any, skill: str) -> tuple[float, list[str]]:
         negatives = profile.get("negative_skills", [])
     negatives = set(negatives or [])
     if skill in negatives:
-        return 0.20, []
-    raw = matched.get(skill, 0.50)
-    score = _clamp_score(raw) or 0.50
+        return 0.25, []
+    raw = matched.get(skill, 0.52)
+    score = _clamp_score(raw) or 0.52
     text = getattr(profile, "text", "")
     if isinstance(profile, dict):
         text = profile.get("text", "")
@@ -261,7 +261,7 @@ def build_automatic_evidence_labels(
     action_bonus = min(0.08, action_count * 0.01)
     for skill, _dimension in role_skills:
         if skill in negatives:
-            score = 0.20
+            score = 0.25
             explanation = "学习者明确表示尚未掌握该能力"
         elif skill in matched:
             score = min(0.92, max(0.35, float(matched[skill])) + evidence_bonus + action_bonus)
@@ -358,7 +358,7 @@ class GroundTruthCalibrationAgent:
                 and gold_status is not None
                 and predicted_status == gold_status
             )
-            # 有连续分数时，优先按数值误差判定；0.70 的分类边界附近
+            # 有连续分数时，优先按数值误差判定；0.65 的分类边界附近
             # 即使状态标签不同，也不能把 0.07 的分数误差算成完全错误。
             score_correct = absolute_error is not None and absolute_error <= PASS_MAE
             is_correct = score_correct if absolute_error is not None else status_correct
@@ -486,7 +486,7 @@ class GroundTruthCalibrationAgent:
         weighted = {"high": 1.6, "mid": 1.0, "low": 0.5}
         denominator = sum(weighted.get(item["weight"], 1.0) for item in corrected_vector) or 1.0
         overall = round(sum(item["value"] * weighted.get(item["weight"], 1.0) for item in corrected_vector) / denominator, 4)
-        gaps = [item["requirement_name"] for item in corrected_scores if float(item["score"]) < 0.60][:15]
+        gaps = [item["requirement_name"] for item in corrected_scores if float(item["score"]) < 0.55][:15]
         diagnosis["ability_vector"] = corrected_vector
         diagnosis["overall_mastery"] = overall
         diagnosis["knowledge_gaps"] = gaps

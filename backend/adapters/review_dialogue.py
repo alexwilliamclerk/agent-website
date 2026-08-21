@@ -25,7 +25,7 @@ REVIEW_DIALOGUE_SYSTEM = """你是“资料审查 Agent”的对话准入模块�
 规则：
 1. 只能依据程序注入的岗位信息、结构化摘要、最近对话和当前输入回答，不能编造简历、项目或技能。
 2. 第 1 轮学习者输入后，decision 必须为 ask_followup，并且 question 只能问一个最关键的缺口。
-3. 第 2 轮及以后：若已具备技能/实践/待补强方向中的足够证据，可 decision=ready_for_diagnosis；否则继续 ask_followup。
+3. 第 2 轮及以后：若已具备技能/实践/待补强方向中的足够证据，可 decision=ready_for_diagnosis；否则继续 ask_followup，每次只追问一个最重要的缺口。
 4. force_finish=true 代表学习者明确选择“按当前资料进入诊断”。此时 decision 必须为 ready_for_diagnosis，但 missing 必须保留仍缺少的证据。
 5. 问题应具体、简短、易回答，例如询问本人在项目中的职责、技术实现、验证方式或不熟悉的能力；不得泛泛要求“补充更多内容”。
 6. summary 只保留已在用户输入中出现的事实，数组字段每项不超过 32 个汉字。
@@ -170,7 +170,8 @@ def review_turn(
     }
     missing = _unique_items(result.get("missing")) or _missing(summary)
     min_turns = max(MINIMUM_TURNS, int(minimum_turns or MINIMUM_TURNS))
-    requested_ready = str(result.get("decision") or "") == "ready_for_diagnosis"
+    model_decision = str(result.get("decision") or "")
+    requested_ready = model_decision == "ready_for_diagnosis"
     # “暂不补充” is a recorded second learner turn, not a way to bypass the
     # initial mandatory prompt through a hand-crafted first API request.
     can_force_finish = bool(force_finish and turn_count >= min_turns)
@@ -178,6 +179,11 @@ def review_turn(
     # A deterministic fallback may release a well-described second turn even
     # when an API response is unavailable; lack of an API must not block use.
     if turn_count >= min_turns and not missing:
+        ready = True
+    # When the external model is unavailable, do not trap the learner in an
+    # endless follow-up loop. Two of the three evidence groups are sufficient
+    # for a provisional diagnosis; the remaining gap stays visible downstream.
+    if turn_count >= min_turns and not model_decision and len(missing) <= 1:
         ready = True
     if can_force_finish:
         ready = True

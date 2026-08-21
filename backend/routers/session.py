@@ -187,7 +187,7 @@ def submit_review_turn(
     ready = result.get("decision") == "ready_for_diagnosis"
     question = str(result.get("question") or "")
     assistant_message = (
-        "资料审查已完成。我会基于这两轮对话中的能力证据进入正式诊断。"
+        f"资料审查已完成。我会基于本次共 {next_turn} 轮对话中的能力证据进入正式诊断。"
         if ready else f"我已记录这一轮信息。{question}"
     )
 

@@ -60,15 +60,18 @@ class ReviewDialogueApiTests(unittest.TestCase):
         db.commit()
         db.close()
 
-    def _new_session(self) -> str:
+    def _new_session(self, minimum_turns: int = 2) -> str:
         db = SessionLocal()
         job = db.query(Job).filter(Job.job_title == "前端开发工程师").first()
         job_id = job.id if job else ""
         db.close()
         self.assertIsNotNone(job)
-        created = self.client.post("/api/session/create", json={"job_id": job_id})
+        created = self.client.post(
+            "/api/session/create",
+            json={"job_id": job_id, "minimum_turns": minimum_turns},
+        )
         self.assertEqual(created.status_code, 201, created.text)
-        self.assertEqual(created.json()["minimum_turns"], 2)
+        self.assertEqual(created.json()["minimum_turns"], minimum_turns)
         return created.json()["id"]
 
     @patch("adapters.review_dialogue.chat_json", side_effect=_complete_llm_reply)
@@ -125,6 +128,65 @@ class ReviewDialogueApiTests(unittest.TestCase):
         self.assertEqual(skipped.json()["turn_count"], 1)
         self.assertFalse(skipped.json()["ready_for_diagnosis"])
         self.assertEqual(skipped.json()["decision"], "ask_followup")
+
+    @patch("adapters.review_dialogue.chat_json", return_value={
+        "decision": "ask_followup",
+        "question": "请继续补充更多细节。",
+        "missing": ["项目或实践中的本人职责", "尚不熟悉或希望补强的能力"],
+        "summary": {
+            "known_skills": ["Vue"],
+            "practice_evidence": [],
+            "weak_or_unknown": [],
+            "learning_goals": ["前端开发工程师"],
+        },
+        "reason": "证据仍不足",
+    })
+    def test_third_turn_keeps_its_real_number_when_agent_needs_more_evidence(self, _chat):
+        session_id = self._new_session()
+        replies = []
+        for content in [
+            "我会使用 Vue 开发页面，并完成过课程项目。",
+            "我在项目中负责购物车页面和接口联调。",
+            "我使用 Network 面板检查请求结果，但工程化部署还不熟。",
+        ]:
+            response = self.client.post(
+                f"/api/session/{session_id}/review-turn",
+                json={"content": content},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            replies.append(response.json())
+
+        self.assertFalse(replies[1]["ready_for_diagnosis"])
+        self.assertEqual(replies[2]["turn_count"], 3)
+        self.assertFalse(replies[2]["ready_for_diagnosis"])
+        self.assertEqual(replies[2]["decision"], "ask_followup")
+        self.assertTrue(replies[2]["question"])
+
+        messages = self.client.get(f"/api/session/{session_id}/messages")
+        self.assertEqual(messages.status_code, 200)
+        self.assertEqual(
+            [item["turn_index"] for item in messages.json()],
+            [1, 1, 2, 2, 3, 3],
+        )
+
+    @patch("adapters.review_dialogue.chat_json", side_effect=RuntimeError("provider unavailable"))
+    def test_fallback_releases_sufficient_second_turn_without_external_model(self, _chat):
+        session_id = self._new_session()
+        first = self.client.post(
+            f"/api/session/{session_id}/review-turn",
+            json={"content": "我会使用 Vue 和 JavaScript 开发页面，完成过电商课程项目。"},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertFalse(first.json()["ready_for_diagnosis"])
+
+        second = self.client.post(
+            f"/api/session/{session_id}/review-turn",
+            json={"content": "我负责购物车接口联调并用 Network 验证结果，但工程化部署还不熟。"},
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["turn_count"], 2)
+        self.assertTrue(second.json()["ready_for_diagnosis"])
+        self.assertEqual(second.json()["decision"], "ready_for_diagnosis")
 
     def test_second_turn_weakness_does_not_negate_first_turn_skill(self):
         profile = InputParsingAgent()._run_rules(

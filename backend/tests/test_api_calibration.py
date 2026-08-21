@@ -112,6 +112,9 @@ class ApiCalibrationTests(unittest.TestCase):
         persisted = self.client.get(f"/api/assessment/{assessment_id}")
         self.assertEqual(persisted.status_code, 200, persisted.text)
         body = persisted.json()
+        self.assertIn("我会使用 Redis 开发缓存接口", body["user_input"])
+        self.assertIn("我对缓存穿透排查还不熟", body["user_input"])
+        self.assertNotIn("我会使用 Redis 开发并完成缓存项目", body["user_input"])
         self.assertEqual(body["calibration_status"], "passed")
         self.assertEqual(body["calibration_summary"]["accuracy"], 1.0)
 
@@ -147,9 +150,9 @@ class ApiCalibrationTests(unittest.TestCase):
         self.assertIn("diagnosis_confidence", automatic_body["calibration"]["calculation"])
         self.assertIn("binary_item_accuracy", automatic_body["calibration"])
         expected = round(
-            0.70 * automatic_body["calibration"]["continuous_agreement"]
-            + 0.25 * automatic_body["calibration"]["diagnosis_confidence_component"]
-            + 0.05 * automatic_body["calibration"]["explicit_evidence_coverage"],
+            0.45 * automatic_body["calibration"]["continuous_agreement"]
+            + 0.40 * automatic_body["calibration"]["diagnosis_confidence_component"]
+            + 0.15 * automatic_body["calibration"]["explicit_evidence_coverage"],
             4,
         )
         self.assertAlmostEqual(automatic_body["calibration"]["accuracy"], expected, places=4)
