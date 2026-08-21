@@ -748,4 +748,74 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleShortcut))
 .dialog-actions .primary-gradient-button { display: inline-flex; align-items: center; gap: 6px; border: 0; color: #fff; }
 .dialog-actions .primary-gradient-button svg { width: 14px; }
 @media (max-width: 820px) { .library-path ol { grid-template-columns: 1fr; gap: 8px; } .library-path ol::before { display: none; } .library-path li { display: grid; grid-template-columns: 32px 1fr; gap: 9px; text-align: left; align-items: center; } .library-path li > div { min-height: auto; margin: 0; } .dialog-actions { justify-content: stretch; flex-direction: column; } }
+
+/* Stable heading grid: prevent the title from collapsing into a vertical strip
+   when a wide search box and view switch share the same desktop row. */
+@media (min-width: 1241px) {
+  .library-page .library-heading {
+    width: calc(100% - 328px);
+    margin-left: 328px;
+    display: grid;
+    grid-template-columns: minmax(320px, 410px) minmax(460px, 1fr);
+    align-items: center;
+    gap: 30px;
+  }
+  .library-page .heading-copy { min-width: 320px; max-width: none; }
+  .library-page .heading-copy .page-title { white-space: nowrap; word-break: keep-all; }
+  .library-page .heading-actions { min-width: 0; margin-top: 0; }
+  .library-page .search-box { min-width: 0; }
+  .library-page .library-content,
+  .library-page .overview-column { min-width: 0; }
+}
+@media (max-width: 1240px) and (min-width: 821px) {
+  .library-page .library-heading {
+    width: 100%;
+    margin-left: 0;
+    grid-template-columns: minmax(260px, .72fr) minmax(380px, 1.28fr);
+    gap: 24px;
+  }
+  .library-page .heading-copy .page-title { white-space: nowrap; word-break: keep-all; }
+}
+
+/* Mid-size desktop: retain three columns without starving the learning stage. */
+@media (min-width: 1061px) and (max-width: 1450px) {
+  .library-page .library-heading {
+    width: calc(100% - 228px);
+    margin-left: 228px;
+    grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+    gap: 22px;
+  }
+  .library-page .library-layout {
+    grid-template-columns: 210px minmax(0, 1fr) 220px;
+    gap: 18px;
+  }
+  .library-page .filter-panel {
+    min-height: 760px;
+    margin-top: -110px;
+    padding: 21px 19px;
+    border-radius: 24px;
+  }
+  .library-page .filter-group { padding-top: 22px; }
+  .library-page .filter-group + .filter-group { margin-top: 16px; }
+  .library-page .filter-group label { margin: 11px 0; }
+  .library-page .learning-package {
+    min-height: 330px;
+    grid-template-columns: minmax(300px, 1.08fr) minmax(250px, .92fr);
+    gap: 14px;
+    padding: 27px 25px;
+  }
+  .library-page .package-copy h2 {
+    font-size: clamp(27px, 2.25vw, 34px);
+    line-height: 1.16;
+    word-break: keep-all;
+  }
+  .library-page .spatial-resource-object { min-height: 270px; }
+  .library-page .overview-column { gap: 15px; min-height: 760px; }
+  .library-page .overview-column > .overview-card,
+  .library-page .overview-column > .collection-card {
+    min-height: 360px;
+    padding: 22px 19px;
+    border-radius: 24px;
+  }
+}
 </style>

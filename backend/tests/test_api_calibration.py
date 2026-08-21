@@ -38,6 +38,10 @@ class ApiCalibrationTests(unittest.TestCase):
         db.expunge(cls.user)
         db.close()
         main.app.dependency_overrides[auth.get_current_user] = lambda: cls.user
+        cls._original_llm_available = agent_runtime._LLM_AVAILABLE
+        cls._original_retriever = agent_adapter._runtime.retriever
+        cls._original_runtime_guard = agent_runtime.check_hallucination
+        cls._original_guard = guardrail.check_hallucination
         agent_runtime._LLM_AVAILABLE = False
         agent_adapter._runtime.retriever = FakeRetriever()
         agent_runtime.check_hallucination = lambda *_args, **_kwargs: {"has_hallucination": False, "verdict": "grounded", "reason": "test"}
@@ -45,6 +49,10 @@ class ApiCalibrationTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        agent_runtime._LLM_AVAILABLE = cls._original_llm_available
+        agent_adapter._runtime.retriever = cls._original_retriever
+        agent_runtime.check_hallucination = cls._original_runtime_guard
+        guardrail.check_hallucination = cls._original_guard
         main.app.dependency_overrides.clear()
         db = SessionLocal()
         db.query(User).filter(User.id == cls.user_id).delete(synchronize_session=False)

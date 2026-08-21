@@ -413,6 +413,63 @@ def _run_assessment(
         total_resources = max(1, len(path_knowledge_points) * len(resource_types))
         generated_count = 0
 
+        from adapters.agent_runtime import ROLE_PROFILES as _ROLES
+        role = _ROLES.get(target_job, _ROLES["后端开发工程师"])
+        skill_to_dimension = {skill: dimension for skill, dimension in role["skills"]}
+        dimension_scores = {
+            str(item.get("name") or ""): float(item.get("value") or 0)
+            for item in diagnosis.get("ability_vector", []) if isinstance(item, dict)
+        }
+        ordered_weak_dimensions = sorted(dimension_scores, key=dimension_scores.get)
+
+        def build_learner_context(knowledge_point: str, gap_id: str) -> dict:
+            focus_dimension = skill_to_dimension.get(knowledge_point, "")
+            if not focus_dimension:
+                for skill, dimension in role["skills"]:
+                    if skill.lower() in knowledge_point.lower() or knowledge_point.lower() in skill.lower():
+                        focus_dimension = dimension
+                        break
+            if not focus_dimension:
+                focus_dimension = ordered_weak_dimensions[0] if ordered_weak_dimensions else "岗位核心能力"
+
+            gaps = [str(value) for value in diagnosis.get("knowledge_gaps", []) if str(value).strip()]
+            focus_gap = next(
+                (gap for gap in gaps if focus_dimension in gap or knowledge_point.lower() in gap.lower()),
+                gaps[0] if gaps else f"{knowledge_point} 的可验证能力证据不足",
+            )
+            related_requirements = []
+            evidence_ids = []
+            for item in diagnosis.get("requirement_scores", []):
+                if not isinstance(item, dict):
+                    continue
+                haystack = " ".join(str(item.get(key) or "") for key in ("requirement_name", "dimension"))
+                if focus_dimension in haystack or knowledge_point.lower() in haystack.lower():
+                    related_requirements.append({
+                        "requirement_id": item.get("requirement_id"),
+                        "requirement_name": item.get("requirement_name"),
+                        "score": item.get("score"),
+                        "status": item.get("status"),
+                    })
+                    raw_ids = item.get("evidence_ids") or ([item.get("evidence_id")] if item.get("evidence_id") else [])
+                    evidence_ids.extend(str(value) for value in raw_ids if value)
+
+            score = dimension_scores.get(focus_dimension, diagnosis.get("overall_mastery", 0))
+            evidence_summary = (
+                f"{focus_dimension}得分约 {float(score or 0):.0%}；"
+                f"已关联 {len(set(evidence_ids))} 条能力证据；"
+                f"用户资料摘要：{str(agent_input or '').strip()[:260]}"
+            )
+            return {
+                "target_job": target_job,
+                "ability_gap_id": gap_id,
+                "focus_dimension": focus_dimension,
+                "dimension_score": round(float(score or 0), 3),
+                "focus_gap": focus_gap,
+                "evidence_summary": evidence_summary,
+                "related_requirements": related_requirements[:4],
+                "evidence_ids": sorted(set(evidence_ids))[:8],
+            }
+
         def add_generated_resource(generated: dict, knowledge_point: str, gap_id: str) -> None:
             resource = Resource(
                 id=str(uuid.uuid4()),
@@ -456,6 +513,7 @@ def _run_assessment(
                     user_level=diagnosis["overall_mastery"],
                     resource_type=resource_type,
                     gap_id=gap_id,
+                    learner_context=build_learner_context(knowledge_point, gap_id),
                 )
                 add_generated_resource(generated, knowledge_point, gap_id)
                 generated_count += 1
@@ -468,9 +526,6 @@ def _run_assessment(
                 )
 
         # ⑤ 完整性兜底：低分维度缺少路径覆盖时补资源，仍走同一条审核链。
-        from adapters.agent_runtime import ROLE_PROFILES as _ROLES
-        role = _ROLES.get(target_job, _ROLES["后端开发工程师"])
-        skill_to_dimension = {skill: dimension for skill, dimension in role["skills"]}
         covered_dimensions = set()
         for knowledge_point in path_knowledge_points:
             dimension = skill_to_dimension.get(knowledge_point)
@@ -506,6 +561,7 @@ def _run_assessment(
                         user_level=diagnosis["overall_mastery"],
                         resource_type=resource_type,
                         gap_id=f"gap_fill_{dimension_name}",
+                        learner_context=build_learner_context(skill_name, f"gap_fill_{dimension_name}"),
                     )
                     add_generated_resource(generated, skill_name, f"gap_fill_{dimension_name}")
                     generated_count += 1

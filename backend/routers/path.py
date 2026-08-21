@@ -18,6 +18,7 @@ from models.user import User
 from routers.auth import get_current_user
 from dimensions import get_weight_for_knowledge
 from adapters.guardrail import detect_unrequested_resource_type
+from adapters.agent_runtime import sanitize_learning_path_steps
 
 router = APIRouter()
 
@@ -130,6 +131,7 @@ def get_learning_paths(
         if path.steps:
             job = db.query(Job).filter(Job.id == path.job_id).first()
             target_job = job.job_title if job else ""
-            path.steps = _enrich_steps(path.steps, user_id, target_job, db, path.assessment_id)
+            clean_steps = sanitize_learning_path_steps(list(path.steps), target_job)
+            path.steps = _enrich_steps(clean_steps, user_id, target_job, db, path.assessment_id)
 
     return paths

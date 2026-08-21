@@ -87,44 +87,38 @@ def chat(system_prompt: str, user_message: str, temperature: float | None = None
         return ""
 
 
-def chat_json(system_prompt: str, user_message: str) -> dict:
-    """调用 LLM 并解析 JSON 返回，解析失败返回空 dict"""
+def chat_json_value(system_prompt: str, user_message: str):
+    """调用 LLM 并解析一个 JSON 对象或数组，解析失败返回 None。"""
     text = chat(system_prompt, user_message, temperature=0.3)
     if not text:
-        return {}
-    # 尝试提取 JSON（处理 LLM 可能包裹的 markdown 代码块或尾部多余文本）
-    for start_marker, end_marker in [("```json", "```"), ("```", "```"), ("{", None)]:
+        return None
+    # 先处理 Markdown 代码块，再从首个 JSON 起始符解析完整值。
+    candidates = []
+    for marker in ("```json", "```"):
         try:
-            start = text.index(start_marker)
-            if start_marker == "{":
-                start = text.index("{", start)
+            start = text.index(marker) + len(marker)
+            end = text.index("```", start)
+            candidates.append(text[start:end].strip())
         except ValueError:
-            continue
-        body_start = start + len(start_marker) if start_marker != "{" else start
-        if end_marker:
-            try:
-                end = text.index(end_marker, body_start)
-                candidate = text[body_start:end].strip()
-            except ValueError:
-                continue
-        else:
-            candidate = text[body_start:]
-        # 用 JSONDecoder 逐对象解析，只取第一个完整 JSON
-        import json as _json
+            pass
+    starts = [index for index in (text.find("{"), text.find("[")) if index >= 0]
+    if starts:
+        candidates.append(text[min(starts):].strip())
+
+    import json as _json
+    for candidate in candidates:
         try:
             decoder = _json.JSONDecoder()
             obj, _ = decoder.raw_decode(candidate)
-            if isinstance(obj, dict):
+            if isinstance(obj, (dict, list)):
                 return obj
         except _json.JSONDecodeError:
             continue
-    # fallback: 正则提取
-    match = re.search(r"\{[\s\S]*\}", text)
-    if not match:
-        print(f"[LLM] JSON 解析失败，未找到 {{...}}", file=sys.stderr, flush=True)
-        return {}
-    try:
-        return json.loads(match.group())
-    except json.JSONDecodeError as e:
-        print(f"[LLM] JSON 解析失败: {e}", file=sys.stderr, flush=True)
-        return {}
+    print("[LLM] JSON 解析失败，未找到有效对象或数组", file=sys.stderr, flush=True)
+    return None
+
+
+def chat_json(system_prompt: str, user_message: str) -> dict:
+    """调用 LLM 并解析 JSON 对象；数组由 chat_json_value 读取。"""
+    value = chat_json_value(system_prompt, user_message)
+    return value if isinstance(value, dict) else {}

@@ -28,7 +28,7 @@ from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from .guardrail import check_hallucination, detect_unrequested_resource_type
-from .llm_client import chat, chat_json
+from .llm_client import chat, chat_json, chat_json_value
 from .calibration import GroundTruthCalibrationAgent, build_requirement_scores
 from .context_manager import ContextManager
 
@@ -79,6 +79,158 @@ JOB_ALIASES = {
 def normalize_job(job: str) -> str:
     name = str(job or "").strip()
     return JOB_ALIASES.get(name, name)
+
+
+_TOPIC_NOISE = re.compile(
+    r"构建失败|加载失败|生成失败|视频脚本|开场引入|总结提问|复制粘贴|"
+    r"点击这里|暂无内容|待生成|unknown|error|failed|dedication|主要作者|本文编写中",
+    re.IGNORECASE,
+)
+
+
+def _clean_topic(value: Any, fallback: str = "") -> str:
+    """Turn a retrieved heading into a stable learner-facing knowledge point."""
+    text = str(value or "").strip()
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"^[\s#>*`_\-–—\d.、()（）]+", "", text)
+    text = re.sub(r"^(问题|Q|Question)[：:]\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" ：:，,。；;|-")
+    if not text or _TOPIC_NOISE.search(text):
+        return str(fallback or "").strip()
+    if len(text) > 54:
+        text = re.split(r"[。；;！？!?]", text, maxsplit=1)[0].strip()
+    if len(text) > 54:
+        text = text[:53].rstrip() + "…"
+    return text or str(fallback or "").strip()
+
+
+def _topic_from_source(content: str, fallback: str) -> str:
+    candidates = []
+    for pattern in (
+        r"(?:问题|Question)[：:]\s*(.+?)(?:\n|$)",
+        r"(?:^|\n)\s*[-*]?\s*Q[：:]\s*(.+?)(?:\n|$)",
+        r"(?:^|\n)\s*#{1,4}\s+(.+?)(?:\n|$)",
+    ):
+        match = re.search(pattern, str(content or ""), flags=re.IGNORECASE)
+        if match:
+            candidates.append(match.group(1))
+    for candidate in candidates:
+        topic = _clean_topic(candidate)
+        if topic:
+            if fallback and fallback.lower() not in topic.lower() and len(topic) < 30:
+                return f"{fallback}：{topic}"
+            return topic
+    return _clean_topic(fallback, "岗位核心能力")
+
+
+def _clean_source_for_learning(content: str) -> str:
+    """Remove transport/Markdown noise while preserving teachable source facts."""
+    text = str(content or "")
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"https?://\S+", "", text)
+    lines = []
+    for raw in text.splitlines():
+        line = re.sub(r"^[\s#>*`_\-]+", "", raw).strip()
+        if not line or _TOPIC_NOISE.search(line):
+            continue
+        if re.match(r"^(参考资料|提取码|作者|source|id)[：:]", line, re.IGNORECASE):
+            continue
+        lines.append(line)
+    return re.sub(r"\s+", " ", " ".join(lines)).strip()
+
+
+def _source_learning_points(hits: list[dict[str, Any]], limit: int = 4) -> list[str]:
+    """Extract short source-grounded points without exposing raw chunks."""
+    points: list[str] = []
+    seen = set()
+    for hit in hits:
+        cleaned = _clean_source_for_learning(str(hit.get("content") or ""))
+        for segment in re.split(r"[。！？!?；;]", cleaned):
+            point = segment.strip(" ：:，,")
+            if len(point) < 12:
+                continue
+            point = point[:56].rstrip("，,：:")
+            key = re.sub(r"\s+", "", point).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            points.append(point)
+            if len(points) >= limit:
+                return points
+    return points
+
+
+def _usable_source_hits(hits: list[dict[str, Any]], knowledge_point: str) -> list[dict[str, Any]]:
+    """Prefer readable, topic-related chunks over noisy repository fragments."""
+    english_terms = set(re.findall(r"[a-z0-9+#._/-]{2,}", knowledge_point.lower()))
+    chinese_terms = set()
+    for run in re.findall(r"[\u4e00-\u9fff]+", knowledge_point):
+        chinese_terms.update(run[index:index + 2] for index in range(max(0, len(run) - 1)))
+    terms = english_terms | chinese_terms
+    ranked = []
+    for hit in hits:
+        source_id = str(hit.get("source_chunk_id") or "").strip()
+        content = str(hit.get("content") or "")
+        cleaned = _clean_source_for_learning(content)
+        if not source_id or len(cleaned) < 70:
+            continue
+        if re.search(r"dedication|提取码|加群|二维码", cleaned[:260], re.IGNORECASE):
+            continue
+        raw_requirement_ids = hit.get("candidate_requirement_ids") or []
+        if isinstance(raw_requirement_ids, (list, tuple, set)):
+            requirement_ids = " ".join(str(value) for value in raw_requirement_ids)
+        else:
+            requirement_ids = str(raw_requirement_ids)
+        searchable = f"{hit.get('title', '')} {content} {requirement_ids}".lower()
+        relevance = sum(1 for term in terms if term.lower() in searchable)
+        ranked.append((relevance, float(hit.get("score") or 0), hit))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    related = [item[2] for item in ranked if item[0] > 0]
+    return related[:8] or [item[2] for item in ranked[:5]]
+
+
+def sanitize_learning_path_steps(
+    steps: list[Any] | None,
+    target_job: str = "",
+    knowledge_catalog: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Normalize generated and persisted path steps for learner-facing APIs."""
+    role = normalize_job(target_job)
+    role_fallbacks = [skill for skill, _dimension in ROLE_PROFILES.get(role, {}).get("skills", [])]
+    fallbacks = [
+        topic for topic in (_clean_topic(value) for value in (knowledge_catalog or [])) if topic
+    ] + role_fallbacks
+    if not fallbacks:
+        fallbacks = ["岗位基础巩固", "岗位项目实践", "岗位综合复测"]
+
+    result: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for index, raw in enumerate((steps or [])[:8], start=1):
+        item = raw if isinstance(raw, dict) else {}
+        fallback = next((value for value in fallbacks if value not in used), f"岗位能力进阶 {index}")
+        topic = _clean_topic(item.get("knowledge_point"), fallback)
+        if not topic or topic in used:
+            topic = _clean_topic(fallback, f"岗位能力进阶 {index}")
+        used.add(topic)
+        raw_type = str(item.get("resource_type") or "")
+        resource_type = "练习" if "练" in raw_type or "实操" in raw_type else "讲义"
+        try:
+            estimated_time = int(item.get("estimated_time") or 30)
+        except (TypeError, ValueError):
+            estimated_time = 30
+        prerequisite = _clean_topic(item.get("prerequisite")) if item.get("prerequisite") else None
+        result.append({
+            "step": index,
+            "knowledge_point": topic,
+            "resource_type": resource_type,
+            "estimated_time": min(120, max(15, estimated_time)),
+            "prerequisite": prerequisite,
+            **({key: item[key] for key in ("resource_id", "status", "record_id", "weight") if key in item}),
+        })
+    return result
 
 
 # The profile is intentionally kept in the Agent package so all four roles
@@ -279,19 +431,15 @@ class RAGEvidenceAgent:
         profile.retrieval_hits.sort(key=lambda h: h.get("score", 0), reverse=True)
         profile.retrieval_hits = profile.retrieval_hits[:120]
 
-        # 从检索结果中提取知识目录（去重），供下游 Agent 了解知识库有哪些内容可推荐
-        # 知识库格式：ID：xxx\n难度：xxx\n问题：xxx\n回答：xxx
+        # 从检索结果中提取知识目录（去重）。知识库同时包含问答、Markdown
+        # 章节和技术文档，不能只识别“问题：”这一种格式。
         seen_topics = set()
         for hit in profile.retrieval_hits:
             content = hit.get("content", "")
             query = hit.get("query", "")
             if not content:
                 continue
-            # 提取"问题"行作为知识点主题
-            m = re.search(r"问题[：:]\s*(.+?)(?:\n|$)", content)
-            if not m:
-                continue
-            topic = m.group(1).strip()
+            topic = _topic_from_source(content, query)
             if topic and topic not in seen_topics:
                 seen_topics.add(topic)
                 profile.knowledge_catalog.append(topic)
@@ -491,7 +639,16 @@ class ResourceAgent:
     def __init__(self, retriever: Retriever):
         self.retriever = retriever
 
-    def run(self, knowledge_point: str, user_level: float, resource_type: str, target_job: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def run(
+        self,
+        knowledge_point: str,
+        user_level: float,
+        resource_type: str,
+        target_job: str,
+        learner_context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        knowledge_point = _clean_topic(knowledge_point, "岗位核心能力")
+        learner_context = dict(learner_context or {})
         if str(resource_type or "").strip() not in {"讲义", "练习", "案例"}:
             return {
                 "content_type": str(resource_type or ""),
@@ -501,6 +658,7 @@ class ResourceAgent:
                 "generation_method": "none",
             }, []
         hits = self.retriever.search(f"{target_job} {knowledge_point}", target_job, top_k=10)
+        hits = _usable_source_hits(hits, knowledge_point)
         if not hits:
             return {
                 "content_type": resource_type,
@@ -511,13 +669,21 @@ class ResourceAgent:
             }, []
 
         if not _LLM_AVAILABLE:
-            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits)
+            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
         try:
-            return self._run_llm(knowledge_point, user_level, resource_type, target_job, hits)
+            return self._run_llm(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
         except Exception:
-            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits)
+            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
 
-    def _run_llm(self, knowledge_point: str, user_level: float, resource_type: str, target_job: str, hits: list) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def _run_llm(
+        self,
+        knowledge_point: str,
+        user_level: float,
+        resource_type: str,
+        target_job: str,
+        hits: list,
+        learner_context: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         rag_text = "\n---\n".join([
             f"[{h.get('title', '')}] {h.get('content', '')[:800]}"
             for h in hits[:10]
@@ -533,14 +699,19 @@ class ResourceAgent:
         system = f"""{persona}
 
 请为学习者生成关于「{knowledge_point}」的{resource_type}内容。
-学习者当前水平：{user_level:.1f}/5
+学习者当前岗位综合掌握度：{max(0.0, min(1.0, user_level)):.0%}
 目标岗位：{target_job}
+
+【本次学习者诊断上下文】
+{json.dumps(learner_context, ensure_ascii=False)[:2200]}
 
 【知识库参考资料】
 {rag_text}
 
 【生成要求】
 - 先列出检索片段中必须覆盖的关键概念（3-6 个），再逐一写入正文，不得遗漏
+- 开头必须用一段“为什么为你推荐”说明本资源对应的能力缺口和已有证据；不得写成面向所有人的通用推荐
+- 内容必须包含可直接学习的解释或可直接执行的步骤，不得只返回知识点名称、目录或空模板
 - 只生成当前请求的「{resource_type}」，不得追加其他资源类型章节
 - {"讲义：学习目标 + 核心概念讲解 + 关键原理 + 自检问题" if resource_type == "讲义" else "练习：任务背景 + 具体步骤 + 参考提示 + 验收标准" if resource_type == "练习" else "案例：项目背景 + 问题分析 + 解决方案 + 复盘要点"}
 
@@ -553,7 +724,7 @@ class ResourceAgent:
 
         result = chat_json(system, "")
         if not result:
-            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits)
+            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
 
         body = str(result.get("body", "") or "").strip()
         if detect_unrequested_resource_type(body, resource_type).get("found"):
@@ -575,23 +746,60 @@ class ResourceAgent:
             "generation_method": "llm",
         }, hits
 
-    def _run_rules(self, knowledge_point: str, user_level: float, resource_type: str, target_job: str, hits: list) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Return a safe pending template when the external model is unavailable.
-
-        The old fallback inserted source_content directly into body. That made
-        a retrieval chunk appear as a finished learning resource. A rule
-        fallback may provide a task shell, but it must never expose the source.
-        """
+    def _run_rules(
+        self,
+        knowledge_point: str,
+        user_level: float,
+        resource_type: str,
+        target_job: str,
+        hits: list,
+        learner_context: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Build a usable, source-grounded resource when the external LLM is unavailable."""
         title = f"{knowledge_point}{resource_type}"
         difficulty = min(5, max(1, int(round(float(user_level or 0.2) * 5)) + (1 if resource_type == "练习" else 0)))
+        gap = str(learner_context.get("focus_gap") or knowledge_point).strip()
+        evidence = str(learner_context.get("evidence_summary") or "当前提交资料中缺少可核验的完整产出").strip()
+        dimension = str(learner_context.get("focus_dimension") or "岗位核心能力").strip()
+        # The persisted evidence chain currently stores one source_chunk_id.
+        # Generate the grounded outline from that exact chunk so the reviewer
+        # validates the same evidence that the learner-facing resource used.
+        source_points = _source_learning_points(hits[:1])
+        if not source_points:
+            source_points = [f"围绕 {knowledge_point} 建立概念、场景、实现与验证之间的联系"]
+        grounded_outline = "\n".join(
+            f"{index}. {point}" for index, point in enumerate(source_points, start=1)
+        )
+        reason = (
+            f"为什么为你推荐：本次诊断将「{dimension}」识别为优先补强方向；"
+            f"对应缺口为“{gap}”。现有证据显示：{evidence[:160]}。"
+        )
         if resource_type == "讲义":
-            body = f"学习目标：理解并能解释「{knowledge_point}」。\n\n学习任务：\n1. 用自己的话定义该知识点。\n2. 说明它在「{target_job}」岗位中的使用场景。\n3. 写出一个最小示例，并记录输入、输出和异常情况。\n\n当前为待审核任务模板，外部模型完成生成并通过审核后才会进入资料库。"
+            body = (
+                f"{reason}\n\n学习目标：完成后能够解释「{knowledge_point}」的核心机制，"
+                f"并说明它在「{target_job}」实际任务中的使用边界。\n\n"
+                f"知识库提炼要点：\n{grounded_outline}\n\n"
+                "学习方法：先画出概念关系，再写一个最小示例；对每个输入记录预期输出、异常分支和验证方式。\n\n"
+                f"自检问题：你能否不看资料说明 {knowledge_point} 解决什么问题、何时不应使用，以及如何证明实现有效？"
+            )
         elif resource_type == "练习":
-            body = f"练习主题：{knowledge_point}\n\n任务：\n1. 将该知识点转化为一个可验证的岗位任务。\n2. 完成一个最小可运行示例。\n3. 记录输入、输出、异常处理和复盘结论。\n\n当前为待审核任务模板，外部模型完成生成并通过审核后才会进入资料库。"
+            body = (
+                f"{reason}\n\n练习主题：{knowledge_point}\n\n可用知识依据：\n{grounded_outline}\n\n"
+                "执行步骤：\n1. 定义一个与目标岗位相关的最小任务和成功条件。\n"
+                "2. 完成可运行实现，并保存关键配置、输入与输出。\n"
+                "3. 主动构造一个异常场景，记录定位过程和修正结果。\n"
+                "4. 用截图、测试结果或提交记录形成能力证据。\n\n"
+                "验收标准：结果可复现、异常可解释、关键决策有记录，并能说明本次产出如何补上诊断缺口。"
+            )
         elif resource_type == "案例":
-            body = f"案例任务：围绕「{knowledge_point}」完成一次岗位化问题拆解。\n\n交付物：问题定义、方案说明、实现或原型、验证结果、问题复盘。\n\n当前为待审核任务模板，外部模型完成生成并通过审核后才会进入资料库。"
+            body = (
+                f"{reason}\n\n案例主题：围绕「{knowledge_point}」完成一次岗位化问题拆解。\n\n"
+                f"案例依据：\n{grounded_outline}\n\n"
+                "分析顺序：业务目标、约束条件、候选方案、取舍理由、验证结果和复盘。\n\n"
+                "交付物：问题定义、方案说明、实现或原型、验证记录与下一步改进清单。"
+            )
         else:
-            body = f"讲解脚本：{knowledge_point}\n\n结构：开场问题、概念解释、岗位场景、操作演示、总结提问。\n\n当前为待审核脚本模板，外部模型完成生成并通过审核后才会进入资料库。"
+            body = f"{reason}\n\n{grounded_outline}"
         return {"content_type": resource_type, "title": title, "body": body, "difficulty": difficulty, "generation_method": "rules"}, hits
 
 
@@ -599,12 +807,21 @@ class PathAgent:
     name = "个性化学习路径 Agent"
 
     def run(self, user_id: str, target_job: str, current_ability: list[float], knowledge_catalog: list[str], knowledge_catalog_map: dict[str, list[str]], events: list[AgentEvent]) -> list[dict[str, Any]]:
+        cleaned_catalog = []
+        for value in knowledge_catalog:
+            topic = _clean_topic(value)
+            if topic and topic not in cleaned_catalog:
+                cleaned_catalog.append(topic)
+        cleaned_map = {
+            skill: [topic for topic in (_clean_topic(value) for value in values) if topic]
+            for skill, values in knowledge_catalog_map.items()
+        }
         if not _LLM_AVAILABLE:
-            return self._run_rules(target_job, current_ability, knowledge_catalog, knowledge_catalog_map, events)
+            return self._run_rules(target_job, current_ability, cleaned_catalog, cleaned_map, events)
         try:
-            return self._run_llm(target_job, current_ability, knowledge_catalog, knowledge_catalog_map, events)
+            return self._run_llm(target_job, current_ability, cleaned_catalog, cleaned_map, events)
         except Exception:
-            return self._run_rules(target_job, current_ability, knowledge_catalog, knowledge_catalog_map, events)
+            return self._run_rules(target_job, current_ability, cleaned_catalog, cleaned_map, events)
 
     def _run_llm(self, target_job: str, current_ability: list[float], knowledge_catalog: list[str], knowledge_catalog_map: dict[str, list[str]], events: list[AgentEvent]) -> list[dict[str, Any]]:
         role = ROLE_PROFILES[target_job]
@@ -634,9 +851,12 @@ class PathAgent:
 
 请输出 JSON 数组：[{{"step":1,"knowledge_point":"具体问题/概念","resource_type":"讲义","estimated_time":30,"prerequisite":null}}, ...]"""
 
-        steps = chat_json(system, "")
+        steps = chat_json_value(system, "")
         # 必须恰好 8 步，否则 LLM 输出不可靠，降级为规则模式
         if not steps or not isinstance(steps, list) or len(steps) != 8:
+            return self._run_rules(target_job, current_ability, knowledge_catalog, knowledge_catalog_map, events)
+        steps = self._normalize_steps(steps, target_job, knowledge_catalog)
+        if len(steps) != 8:
             return self._run_rules(target_job, current_ability, knowledge_catalog, knowledge_catalog_map, events)
 
         events.append(AgentEvent(
@@ -646,6 +866,9 @@ class PathAgent:
             confidence=0.82,
         ))
         return steps
+
+    def _normalize_steps(self, steps: list[Any], target_job: str, knowledge_catalog: list[str]) -> list[dict[str, Any]]:
+        return sanitize_learning_path_steps(steps, target_job, knowledge_catalog)
 
     def _run_rules(self, target_job: str, current_ability: list[float], knowledge_catalog: list[str], knowledge_catalog_map: dict[str, list[str]], events: list[AgentEvent]) -> list[dict[str, Any]]:
         role = ROLE_PROFILES[target_job]
@@ -706,9 +929,9 @@ class PathAgent:
         for index, (value, skill, dimension) in enumerate(selected, start=1):
             topics = skill_topics.get(skill, [])
             if topics:
-                topic = topics[(index - 1) % len(topics)]
+                topic = _clean_topic(topics[(index - 1) % len(topics)], skill)
             elif knowledge_catalog and index - 1 < len(knowledge_catalog):
-                topic = knowledge_catalog[index - 1]
+                topic = _clean_topic(knowledge_catalog[index - 1], skill)
             else:
                 topic = skill
             steps.append({
@@ -725,7 +948,7 @@ class PathAgent:
             output_summary=f"生成 {len(steps)} 个学习步骤。",
             confidence=0.82,
         ))
-        return steps
+        return self._normalize_steps(steps, target_job, knowledge_catalog)
 
 
 class AgentRuntime:
@@ -918,12 +1141,24 @@ class AgentRuntime:
         }
         return result
 
-    def generate_resource(self, knowledge_point: str, user_level: float, resource_type: str) -> dict[str, Any]:
+    def generate_resource(
+        self,
+        knowledge_point: str,
+        user_level: float,
+        resource_type: str,
+        learner_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         role = self._current_job.get()
         if role not in ROLE_PROFILES:
             role = "后端开发工程师"
         events: list[AgentEvent] = []
-        resource, hits = ResourceAgent(self.retriever).run(knowledge_point, user_level, resource_type, role)
+        resource, hits = ResourceAgent(self.retriever).run(
+            knowledge_point,
+            user_level,
+            resource_type,
+            role,
+            learner_context=learner_context,
+        )
         context_manager = ContextManager()
         source = next(
             (
@@ -947,7 +1182,7 @@ class AgentRuntime:
         ))
         context_manager.record(
             "generate_resource",
-            {"target_job": role, "knowledge_point": knowledge_point, "user_level": user_level, "resource_type": resource_type, "approved_sources": hits},
+            {"target_job": role, "knowledge_point": knowledge_point, "user_level": user_level, "resource_type": resource_type, "learner_context": learner_context or {}, "approved_sources": hits},
             {"content_type": resource.get("content_type"), "title": resource.get("title"), "generation_status": resource.get("generation_status", "pending")},
             source_chunk_ids=[str(source.get("source_chunk_id"))] if source else [],
         )

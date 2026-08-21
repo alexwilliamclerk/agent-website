@@ -395,7 +395,7 @@ watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scor
 .card-heading > svg { width: 21px; color: var(--green-deep); }
 .card-eyebrow { color: var(--ink); font-size: 14px; font-weight: 800; }
 .match-card p { margin: 38px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.55; }
-.match-card > strong { display: block; margin-top: 10px; font-size: 59px; line-height: 1; }
+.match-card > strong { display: block; margin-top: 10px; overflow: visible; font-size: 59px; line-height: 1.08; white-space: nowrap; }
 .match-card > strong small { font-size: 22px; }
 .match-badge { display: inline-flex; align-items: center; gap: 6px; width: max-content; margin-top: 15px; padding: 7px 10px; border-radius: 99px; background: rgba(236,255,243,.78); color: var(--green-deep); font-size: 11px; font-weight: 700; }
 .match-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -651,9 +651,10 @@ watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scor
   background: radial-gradient(circle at 38% 30%, rgba(255,255,255,.5), rgba(248,255,251,.19) 59%, rgba(211,244,224,.08));
   box-shadow: inset 0 2px 2px rgba(255,255,255,.72), 0 16px 38px rgba(12,104,57,.065);
   backdrop-filter: blur(9px);
+  overflow: visible;
 }
 .score-gauge { position: absolute; inset: 6px; }
-.score-value { position: relative; z-index: 2; display: flex; align-items: baseline; justify-content: center; color: #086c40; }
+.score-value { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding-top: 2px; color: #086c40; white-space: nowrap; overflow: visible; }
 .score-value b { font-size: 48px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .score-value span { margin-left: 3px; color: rgba(42,78,57,.58); font-size: 10px; font-weight: 600; }
 .score-verdict { width: max-content; margin: -7px auto 0; padding: 6px 10px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(16,153,80,.12); border-radius: 99px; color: #087748; background: rgba(241,255,247,.38); font-size: 9px; font-weight: 700; backdrop-filter: blur(8px); }

@@ -53,12 +53,19 @@ def calibrate_existing(
     )
 
 
-def generate_resource(knowledge_point: str, user_level: float, resource_type: str, gap_id: str = "") -> dict:
+def generate_resource(
+    knowledge_point: str,
+    user_level: float,
+    resource_type: str,
+    gap_id: str = "",
+    learner_context: dict | None = None,
+) -> dict:
     """Generate one resource using the current request's target-role context."""
     return _runtime.generate_resource(
         knowledge_point=knowledge_point,
         user_level=user_level,
         resource_type=resource_type,
+        learner_context={**(learner_context or {}), "ability_gap_id": gap_id},
     )
 
 
