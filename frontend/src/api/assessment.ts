@@ -59,6 +59,12 @@ export interface CalibrationSummary {
   prediction_count?: number
   label_coverage?: number
   accuracy: number | null
+  binary_item_accuracy?: number | null
+  continuous_agreement?: number | null
+  diagnosis_confidence_component?: number | null
+  explicit_evidence_coverage?: number | null
+  score_tolerance?: number
+  calculation?: string
   score_accuracy?: number | null
   status_accuracy?: number | null
   mean_absolute_error: number | null

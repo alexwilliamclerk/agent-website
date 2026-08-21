@@ -141,9 +141,23 @@ class ApiCalibrationTests(unittest.TestCase):
         self.assertEqual(automatic.status_code, 200, automatic.text)
         automatic_body = automatic.json()
         self.assertEqual(automatic_body["calibration"]["mode"], "automatic_evidence_review")
-        self.assertEqual(automatic_body["calibration"]["metric_label"], "自动证据校准准确率")
+        self.assertEqual(automatic_body["calibration"]["metric_label"], "自动证据校准得分")
         self.assertGreater(automatic_body["calibration"]["evaluated_count"], 0)
         self.assertIsNotNone(automatic_body["calibration"]["accuracy"])
+        self.assertIn("diagnosis_confidence", automatic_body["calibration"]["calculation"])
+        self.assertIn("binary_item_accuracy", automatic_body["calibration"])
+        expected = round(
+            0.70 * automatic_body["calibration"]["continuous_agreement"]
+            + 0.25 * automatic_body["calibration"]["diagnosis_confidence_component"]
+            + 0.05 * automatic_body["calibration"]["explicit_evidence_coverage"],
+            4,
+        )
+        self.assertAlmostEqual(automatic_body["calibration"]["accuracy"], expected, places=4)
+        self.assertGreaterEqual(
+            automatic_body["calibration"]["accuracy"],
+            0.90,
+            "完整、可验证的双轮信息应达到自动证据校准通过线",
+        )
         self.assertFalse(automatic_body["diagnosis_updated"])
         score_before_repair = body["overall_mastery"]
 

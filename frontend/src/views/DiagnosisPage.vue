@@ -3,7 +3,7 @@
     <div class="content-width">
       <header class="diagnosis-heading motion-enter">
         <div><span class="eyebrow">DIAGNOSTIC CORE</span><h1 class="page-title">能力诊断 <MagicStick /></h1><p class="page-subtitle">基于岗位能力模型与可追溯证据，形成多维能力判断、真实结果校准和下一阶段学习建议。</p></div>
-        <div class="heading-actions"><button type="button" class="top-action" :disabled="loading || running" @click="loadAssessment"><Refresh /> 重新读取</button><button type="button" class="top-action primary" :disabled="demoMode || !assessment || assessment.overall_mastery === null || calibrationSubmitting" @click="runAutomaticCalibration"><Loading v-if="calibrationSubmitting" /><Aim v-else /> {{ calibrationSubmitting ? '自动校准中' : '自动校准准确率' }}</button></div>
+        <div class="heading-actions"><button type="button" class="top-action" :disabled="loading || running" @click="loadAssessment"><Refresh /> 重新读取</button><button type="button" class="top-action primary" :disabled="demoMode || !assessment || assessment.overall_mastery === null || calibrationSubmitting" @click="runAutomaticCalibration"><Loading v-if="calibrationSubmitting" /><Aim v-else /> {{ calibrationSubmitting ? '自动校准中' : '自动证据校准' }}</button></div>
       </header>
 
       <section v-if="loading || running" class="diagnosis-loading glass-surface">
@@ -105,7 +105,7 @@ const overallPercent = computed(() => Math.round((assessment.value?.overall_mast
 const strengths = computed(() => [...(assessment.value?.ability_vector || [])].sort((a,b) => b.value - a.value).slice(0, 3)); const gaps = computed(() => assessment.value?.knowledge_gaps || [])
 const levelClass = computed(() => overallPercent.value >= 80 ? 'good' : overallPercent.value >= 60 ? 'partial' : 'needs'); const levelText = computed(() => overallPercent.value >= 80 ? '良好匹配' : overallPercent.value >= 60 ? '部分匹配' : '优先补强')
 const calibration = computed(() => assessment.value?.calibration_summary); const calibrationText = computed(() => calibration.value?.accuracy === null || calibration.value?.accuracy === undefined ? '待校准' : `${Math.round(calibration.value.accuracy * 100)}%`); const accuracyClass = computed(() => typeof calibration.value?.accuracy === 'number' && calibration.value.accuracy >= .9 ? 'accurate' : 'pending')
-const calibrationMetricLabel = computed(() => calibration.value?.mode === 'automatic_evidence_review' ? '自动证据校准准确率' : '真实结果准确率')
+const calibrationMetricLabel = computed(() => calibration.value?.metric_label || (calibration.value?.mode === 'automatic_evidence_review' ? '自动证据校准得分' : '真实结果准确率'))
 const calibrationStatusText = computed(() => calibration.value?.mode === 'automatic_evidence_review' ? '自动证据复核完成' : assessment.value?.calibration_status === 'passed' ? '已通过' : assessment.value?.calibration_status === 'needs_review' ? '需要复核' : '未校准')
 const resourceQualityText = computed(() => !resources.value.length ? '暂无可展示资源' : `${resources.value.filter(item => item.review_status === 'passed').length}/${resources.value.length} 已通过来源校验`)
 const traceLabel = computed(() => traceSourceCount.value ? `${traceSourceCount.value} 条依据` : '证据待加载')
@@ -309,7 +309,7 @@ async function runAutomaticCalibration() {
   try {
     const response = await autoCalibrateAssessment(assessment.value.id)
     const accuracy = response.calibration?.accuracy
-    ElMessage.success(typeof accuracy === 'number' ? `自动校准完成：${Math.round(accuracy * 100)}%` : '自动校准完成')
+    ElMessage.success(typeof accuracy === 'number' ? `自动证据校准完成：${Math.round(accuracy * 100)}%` : '自动证据校准完成')
     await loadAssessment()
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || '自动校准失败')

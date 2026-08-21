@@ -21,11 +21,12 @@ from typing import Any
 
 
 CALIBRATION_VERSION = "ground-truth-calibration-v1"
-AUTO_CALIBRATION_VERSION = "automatic-evidence-review-v1"
+AUTO_CALIBRATION_VERSION = "automatic-evidence-review-v2"
 PASS_ACCURACY = 0.90
 PASS_MAE = 0.10
 REVIEW_ACCURACY = 0.75
 REVIEW_MAE = 0.20
+AUTO_REVIEW_TOLERANCE = 0.05
 
 _ROLE_CODES = {
     "前端开发工程师": "frontend",
@@ -266,8 +267,9 @@ def build_automatic_evidence_labels(
             score = min(0.92, max(0.35, float(matched[skill])) + evidence_bonus + action_bonus)
             explanation = "描述中存在能力关键词、行动表达和可验证结果信号"
         else:
-            score = 0.50
-            explanation = "本轮材料未明确提及，按证据不足的中性基线复核"
+            # 自动复核只能评价本轮明确出现的证据。把未提及能力统一
+            # 设为 0.50 会制造大量伪标签，并在阈值附近把一致结果判错。
+            continue
         labels.append({
             "requirement_id": requirement_id(target_job, skill),
             "requirement_name": skill,

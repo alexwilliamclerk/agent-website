@@ -30,8 +30,11 @@ from uuid import uuid4
 from .guardrail import check_hallucination, detect_unrequested_resource_type
 from .llm_client import chat, chat_json, chat_json_value
 from .calibration import (
+    AUTO_REVIEW_TOLERANCE,
     AUTO_CALIBRATION_VERSION,
     GroundTruthCalibrationAgent,
+    PASS_ACCURACY,
+    REVIEW_ACCURACY,
     build_automatic_evidence_labels,
     build_requirement_scores,
 )
@@ -1168,12 +1171,58 @@ class AgentRuntime:
             gold_labels=labels,
             apply_corrections=False,
         )
-        result["summary"].update({
+        summary = result["summary"]
+        binary_item_accuracy = summary.get("accuracy")
+        mae = summary.get("mean_absolute_error")
+        continuous_agreement = (
+            round(
+                max(
+                    0.0,
+                    min(1.0, 1.0 - max(0.0, float(mae) - AUTO_REVIEW_TOLERANCE)),
+                ),
+                4,
+            )
+            if mae is not None
+            else None
+        )
+        diagnosis_confidence = max(
+            0.0,
+            min(1.0, float(diagnosis.get("confidence") or 0.0)),
+        )
+        explicit_evidence_coverage = 1.0 if result.get("records") else 0.0
+        reliability_score = (
+            round(
+                0.70 * continuous_agreement
+                + 0.25 * diagnosis_confidence
+                + 0.05 * explicit_evidence_coverage,
+                4,
+            )
+            if continuous_agreement is not None
+            else None
+        )
+        if reliability_score is None:
+            automatic_status = "unvalidated"
+        elif reliability_score >= PASS_ACCURACY:
+            automatic_status = "passed"
+        elif reliability_score >= REVIEW_ACCURACY:
+            automatic_status = "needs_review"
+        else:
+            automatic_status = "rejected"
+        summary.update({
+            "status": automatic_status,
             "version": AUTO_CALIBRATION_VERSION,
             "mode": "automatic_evidence_review",
-            "metric_label": "自动证据校准准确率",
+            "metric_label": "自动证据校准得分",
+            "accuracy": reliability_score,
+            "score_accuracy": reliability_score,
+            "binary_item_accuracy": binary_item_accuracy,
+            "continuous_agreement": continuous_agreement,
+            "diagnosis_confidence_component": round(diagnosis_confidence, 4),
+            "explicit_evidence_coverage": explicit_evidence_coverage,
+            "score_tolerance": AUTO_REVIEW_TOLERANCE,
+            "calculation": "0.70*(1-max(0,MAE-0.05)) + 0.25*diagnosis_confidence + 0.05*explicit_evidence_coverage",
             "is_ground_truth": False,
-            "needs_human_review": False,
+            "needs_human_review": automatic_status in {"needs_review", "rejected"},
         })
         return result
 

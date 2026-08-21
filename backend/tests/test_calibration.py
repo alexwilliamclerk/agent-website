@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from adapters.calibration import GroundTruthCalibrationAgent, requirement_id
+from adapters.calibration import (
+    GroundTruthCalibrationAgent,
+    build_automatic_evidence_labels,
+    requirement_id,
+)
 
 
 class Profile:
@@ -37,6 +41,12 @@ class CalibrationTests(unittest.TestCase):
         )
         self.assertEqual(result["summary"]["status"], "unvalidated")
         self.assertIsNone(result["summary"]["accuracy"])
+
+    def test_automatic_review_only_labels_explicit_evidence(self):
+        labels = build_automatic_evidence_labels(
+            "后端开发工程师", self.skills, Profile()
+        )
+        self.assertEqual([item["requirement_name"] for item in labels], ["Redis"])
 
     def test_trusted_gold_label_is_compared_and_can_correct(self):
         result = self.agent.run(
