@@ -20,7 +20,12 @@ class FakeRetriever:
         return [{
             "source_chunk_id": "backend.redis.test",
             "title": "后端能力标准测试片段",
-            "content": "问题：Redis 缓存\n回答：Redis 可用于缓存高频访问数据，降低数据库压力。",
+            "content": (
+                "问题：Redis 缓存如何形成可验证的后端能力证据？\n"
+                "回答：Redis 可用于缓存高频访问数据，降低数据库压力。"
+                "实践中应记录缓存键设计、过期时间、命中率、异常分支和回源策略，"
+                "并通过接口测试、运行日志与优化前后指标证明实现有效。"
+            ),
             "score": 0.92,
         }]
 
@@ -129,6 +134,43 @@ class ApiCalibrationTests(unittest.TestCase):
         self.assertEqual(calibration.status_code, 200)
         self.assertEqual(calibration.json()["summary"]["evaluated_count"], 1)
         self.assertEqual(calibration.json()["records"][0]["requirement_id"], "backend.redis")
+
+        # The learner-facing calibration command must be one click: it derives
+        # reproducible evidence-review labels and never opens a manual form.
+        automatic = self.client.post(f"/api/assessment/{assessment_id}/auto-calibrate")
+        self.assertEqual(automatic.status_code, 200, automatic.text)
+        automatic_body = automatic.json()
+        self.assertEqual(automatic_body["calibration"]["mode"], "automatic_evidence_review")
+        self.assertEqual(automatic_body["calibration"]["metric_label"], "自动证据校准准确率")
+        self.assertGreater(automatic_body["calibration"]["evaluated_count"], 0)
+        self.assertIsNotNone(automatic_body["calibration"]["accuracy"])
+        self.assertFalse(automatic_body["diagnosis_updated"])
+        score_before_repair = body["overall_mastery"]
+
+        # A historical diagnosis with an empty/blocked package can be repaired
+        # in place. TestClient waits for the background task, so the returned
+        # resource list must already contain source-bound learning content.
+        repair = self.client.post(f"/api/assessment/{assessment_id}/repair-learning-package")
+        self.assertEqual(repair.status_code, 200, repair.text)
+        resources = self.client.get("/api/resource/list", params={"assessment_id": assessment_id})
+        self.assertEqual(resources.status_code, 200, resources.text)
+        resource_items = resources.json()
+        self.assertGreater(len(resource_items), 0)
+        self.assertTrue(all(item["source_chunk_id"] for item in resource_items))
+        self.assertTrue(all(len(item["body"].strip()) > 120 for item in resource_items))
+
+        paths = self.client.get(f"/api/path/{self.user_id}", params={"assessment_id": assessment_id})
+        self.assertEqual(paths.status_code, 200, paths.text)
+        self.assertGreater(len(paths.json()), 0)
+        labels = [step["knowledge_point"] for step in paths.json()[0]["steps"]]
+        self.assertFalse(any("构建失败" in label or "###" in label for label in labels))
+        repaired_diagnosis = self.client.get(f"/api/assessment/{assessment_id}")
+        self.assertEqual(repaired_diagnosis.status_code, 200, repaired_diagnosis.text)
+        self.assertEqual(repaired_diagnosis.json()["overall_mastery"], score_before_repair)
+        self.assertEqual(
+            repaired_diagnosis.json()["calibration_summary"]["mode"],
+            "automatic_evidence_review",
+        )
 
 
 if __name__ == "__main__":

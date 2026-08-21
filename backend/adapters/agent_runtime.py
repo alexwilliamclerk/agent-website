@@ -29,7 +29,12 @@ from uuid import uuid4
 
 from .guardrail import check_hallucination, detect_unrequested_resource_type
 from .llm_client import chat, chat_json, chat_json_value
-from .calibration import GroundTruthCalibrationAgent, build_requirement_scores
+from .calibration import (
+    AUTO_CALIBRATION_VERSION,
+    GroundTruthCalibrationAgent,
+    build_automatic_evidence_labels,
+    build_requirement_scores,
+)
 from .context_manager import ContextManager
 
 def _check_llm() -> bool:
@@ -211,7 +216,14 @@ def sanitize_learning_path_steps(
     for index, raw in enumerate((steps or [])[:8], start=1):
         item = raw if isinstance(raw, dict) else {}
         fallback = next((value for value in fallbacks if value not in used), f"岗位能力进阶 {index}")
-        topic = _clean_topic(item.get("knowledge_point"), fallback)
+        raw_topic = _clean_topic(item.get("knowledge_point"), fallback)
+        topic = next(
+            (
+                skill for skill in role_fallbacks
+                if skill.lower() in raw_topic.lower() or raw_topic.lower() in skill.lower()
+            ),
+            fallback,
+        )
         if not topic or topic in used:
             topic = _clean_topic(fallback, f"岗位能力进阶 {index}")
         used.add(topic)
@@ -727,16 +739,15 @@ class ResourceAgent:
             return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
 
         body = str(result.get("body", "") or "").strip()
+        # A model timeout can still return a syntactically valid but unusable
+        # shell.  Never persist a title-only or near-empty learning resource.
+        if len(re.sub(r"\s+", "", body)) < 160:
+            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
         if detect_unrequested_resource_type(body, resource_type).get("found"):
-            # 不把混入其他资源类型的正文当作合格资源，审核层会将其拦截。
-            return {
-                "content_type": resource_type,
-                "title": result.get("title", f"{knowledge_point}{resource_type}"),
-                "body": body,
-                "difficulty": min(5, max(1, int(result.get("difficulty", 2)))),
-                "generation_method": "llm",
-                "content_policy_blocked": True,
-            }, hits
+            # Keep the requested resource available by regenerating it through
+            # the deterministic source-bound template instead of publishing a
+            # mixed document or leaving an empty card in the learner library.
+            return self._run_rules(knowledge_point, user_level, resource_type, target_job, hits, learner_context)
 
         return {
             "content_type": resource_type,
@@ -927,13 +938,9 @@ class PathAgent:
         steps: list[dict[str, Any]] = []
         previous = None
         for index, (value, skill, dimension) in enumerate(selected, start=1):
-            topics = skill_topics.get(skill, [])
-            if topics:
-                topic = _clean_topic(topics[(index - 1) % len(topics)], skill)
-            elif knowledge_catalog and index - 1 < len(knowledge_catalog):
-                topic = _clean_topic(knowledge_catalog[index - 1], skill)
-            else:
-                topic = skill
+            # Persist canonical role skills as path/resource query keys.
+            # Retrieved article headings remain internal RAG context.
+            topic = skill
             steps.append({
                 "step": index, "knowledge_point": topic,
                 "resource_type": "讲义" if index % 2 else "练习",
@@ -1139,6 +1146,35 @@ class AgentRuntime:
             "review": {"approved": result["summary"]["status"] == "passed", "errors": []},
             "context_ledger": context_manager.as_dicts(),
         }
+        return result
+
+    def auto_calibrate_existing(
+        self,
+        user_id: str,
+        target_job: str,
+        diagnosis: dict[str, Any],
+        user_input: str,
+    ) -> dict[str, Any]:
+        """Run the existing calibration Agent with automatic evidence review."""
+        role = self._role(target_job)
+        profile = InputParsingAgent()._run_rules(role, user_input)
+        labels = build_automatic_evidence_labels(role, ROLE_PROFILES[role]["skills"], profile)
+        result = GroundTruthCalibrationAgent().run(
+            target_job=role,
+            diagnosis=diagnosis,
+            role_skills=ROLE_PROFILES[role]["skills"],
+            dimensions=DIMENSIONS,
+            profile=profile,
+            gold_labels=labels,
+            apply_corrections=False,
+        )
+        result["summary"].update({
+            "version": AUTO_CALIBRATION_VERSION,
+            "mode": "automatic_evidence_review",
+            "metric_label": "自动证据校准准确率",
+            "is_ground_truth": False,
+            "needs_human_review": False,
+        })
         return result
 
     def generate_resource(

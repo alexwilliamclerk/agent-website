@@ -319,6 +319,7 @@ def _run_assessment(
     agent_input: str,
     gold_labels: list[dict],
     apply_corrections: bool,
+    preserve_diagnosis: bool = False,
 ) -> None:
     """Run the expensive seven-Agent workflow outside the submit request.
 
@@ -336,23 +337,66 @@ def _run_assessment(
             _set_progress(assessment_id, "评估不存在，任务已停止", 0, status="failed")
             return
 
-        _set_progress(assessment_id, "正在解析学习情况", 5, stage="material", agent="资料解析 Agent")
+        _set_progress(
+            assessment_id,
+            "正在读取已有诊断" if preserve_diagnosis else "正在解析学习情况",
+            44 if preserve_diagnosis else 5,
+            stage="calibration" if preserve_diagnosis else "material",
+            agent="协同调度器" if preserve_diagnosis else "资料解析 Agent",
+        )
 
         def report(stage: str, percent: int, label: str) -> None:
             _set_progress(assessment_id, label, percent, stage=stage)
 
-        # ① 七 Agent 串行诊断：解析 → RAG → 能力诊断 → 校准 → 真实结果校准。
-        # 解析、检索和评分阶段由 runtime 回调报告，避免提交接口提前制造跳跃进度。
-        diagnosis = agent_adapter.diagnose(
-            user_id=user_id,
-            target_job=target_job,
-            user_input=agent_input,
-            gold_labels=gold_labels,
-            apply_corrections=apply_corrections,
-            progress_callback=report,
-        )
-        assessment.agent_trace = agent_adapter.get_last_trace()
-        _set_progress(assessment_id, "能力诊断与真实结果校准完成", 49, stage="calibration", agent="真实结果校准 Agent")
+        if preserve_diagnosis:
+            # A package repair must not silently change the score selected by
+            # the learner or overwrite an expert/automatic calibration.  It
+            # resumes from the persisted, completed diagnosis and rebuilds
+            # only the learning path, resources and source review records.
+            diagnosis = {
+                "overall_mastery": float(assessment.overall_mastery or 0),
+                "ability_vector": list(assessment.ability_vector or []),
+                "ability_matrix": list(assessment.ability_matrix or []),
+                "knowledge_gaps": list(assessment.knowledge_gaps or []),
+                "gap_validation": list(assessment.gap_validation or []),
+                "confidence": float(assessment.confidence or 0.3),
+                "requirement_scores": list(assessment.requirement_scores or []),
+                "calibration": dict(assessment.calibration_summary or {}),
+                "calibration_records": [],
+            }
+            resource_ids = [
+                row[0] for row in db.query(Resource.id).filter(
+                    Resource.assessment_id == assessment.id
+                ).all()
+            ]
+            if resource_ids:
+                db.query(LearningRecord).filter(
+                    LearningRecord.resource_id.in_(resource_ids)
+                ).delete(synchronize_session=False)
+                db.query(ResourceBookmark).filter(
+                    ResourceBookmark.resource_id.in_(resource_ids)
+                ).delete(synchronize_session=False)
+            db.query(Resource).filter(
+                Resource.assessment_id == assessment.id
+            ).delete(synchronize_session=False)
+            db.query(LearningPath).filter(
+                LearningPath.assessment_id == assessment.id
+            ).delete(synchronize_session=False)
+            db.flush()
+            _set_progress(assessment_id, "已保留诊断结果，开始重建学习包", 49, stage="calibration", agent="协同调度器")
+        else:
+            # ① 七 Agent 串行诊断：解析 → RAG → 能力诊断 → 校准 → 真实结果校准。
+            # 解析、检索和评分阶段由 runtime 回调报告，避免提交接口提前制造跳跃进度。
+            diagnosis = agent_adapter.diagnose(
+                user_id=user_id,
+                target_job=target_job,
+                user_input=agent_input,
+                gold_labels=gold_labels,
+                apply_corrections=apply_corrections,
+                progress_callback=report,
+            )
+            assessment.agent_trace = agent_adapter.get_last_trace()
+            _set_progress(assessment_id, "能力诊断与真实结果校准完成", 49, stage="calibration", agent="真实结果校准 Agent")
 
         print(f"[DEBUG] knowledge_gaps: {diagnosis.get('knowledge_gaps')}", flush=True)
         print(f"[DEBUG] overall_mastery: {diagnosis.get('overall_mastery')}", flush=True)
@@ -366,15 +410,16 @@ def _run_assessment(
         assessment.gap_validation = diagnosis.get("gap_validation", [])
         assessment.confidence = diagnosis["confidence"]
         assessment.requirement_scores = diagnosis.get("requirement_scores", [])
-        calibration = diagnosis.get("calibration") or {
+        calibration = diagnosis.get("calibration") or assessment.calibration_summary or {
             "status": "unvalidated",
             "evaluated_count": 0,
             "accuracy": None,
             "mean_absolute_error": None,
         }
-        assessment.calibration_status = calibration.get("status", "unvalidated")
-        assessment.calibration_summary = calibration
-        _persist_calibration_records(db, assessment.id, calibration, diagnosis.get("calibration_records", []))
+        if not preserve_diagnosis:
+            assessment.calibration_status = calibration.get("status", "unvalidated")
+            assessment.calibration_summary = calibration
+            _persist_calibration_records(db, assessment.id, calibration, diagnosis.get("calibration_records", []))
         # Keep the seven-Agent result atomic: a diagnosis is not publishable
         # until its path, resources and source reviews are all persisted.
         db.flush()
@@ -752,6 +797,94 @@ def calibrate_assessment(
         "records": result.get("records", []),
         "diagnosis_updated": bool(summary.get("correction_applied")),
     }
+
+
+@router.post("/{assessment_id}/auto-calibrate")
+def auto_calibrate_assessment(
+    assessment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Run one-click evidence-consistency calibration without a user form."""
+    assessment = db.query(Assessment).filter(
+        Assessment.id == assessment_id,
+        Assessment.user_id == current_user.id,
+    ).first()
+    if not assessment:
+        raise HTTPException(status_code=404, detail="评估不存在")
+    if assessment.overall_mastery is None:
+        raise HTTPException(status_code=409, detail="评估尚未完成，不能自动校准")
+    job = db.query(Job).filter(Job.id == assessment.job_id).first()
+    if not job:
+        raise HTTPException(status_code=409, detail="当前诊断绑定的目标岗位已失效")
+    diagnosis = {
+        "overall_mastery": float(assessment.overall_mastery),
+        "ability_vector": assessment.ability_vector or [],
+        "knowledge_gaps": assessment.knowledge_gaps or [],
+        "requirement_scores": assessment.requirement_scores or [],
+        "confidence": float(assessment.confidence or 0.3),
+    }
+    result = agent_adapter.auto_calibrate_existing(
+        user_id=current_user.id,
+        target_job=job.job_title,
+        diagnosis=diagnosis,
+        user_input=assessment.user_input or "",
+    )
+    summary = result["summary"]
+    assessment.calibration_status = summary.get("status", "needs_review")
+    assessment.calibration_summary = summary
+    _persist_calibration_records(db, assessment.id, summary, result.get("records", []))
+    db.commit()
+    return {
+        "assessment_id": assessment.id,
+        "calibration": summary,
+        "records": result.get("records", []),
+        "diagnosis_updated": False,
+    }
+
+
+@router.post("/{assessment_id}/repair-learning-package")
+def repair_learning_package(
+    assessment_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rebuild path/resources for completed historical diagnoses.
+
+    This repairs records created by older builds whose resource gate hid every
+    item. The diagnosis ID stays stable, so diagnosis and library remain in
+    sync while the downstream package is regenerated.
+    """
+    assessment = db.query(Assessment).filter(
+        Assessment.id == assessment_id,
+        Assessment.user_id == current_user.id,
+    ).first()
+    if not assessment:
+        raise HTTPException(status_code=404, detail="诊断记录不存在")
+    if not assessment.user_input or assessment.overall_mastery is None:
+        raise HTTPException(status_code=409, detail="诊断尚未完成，不能修复学习包")
+    progress = _get_progress(assessment_id)
+    if progress.get("status") in {"running", "waiting"} and 0 < int(progress.get("percent") or 0) < 100:
+        return {"assessment_id": assessment.id, "status": "already_running"}
+    job = db.query(Job).filter(Job.id == assessment.job_id).first()
+    if not job:
+        raise HTTPException(status_code=409, detail="当前诊断绑定的目标岗位已失效")
+
+    # Deletion and regeneration run inside one background transaction. If RAG,
+    # generation or review fails, rollback keeps the previous visible package.
+    _set_progress(assessment.id, "正在修复本次学习路径与资源包", 2, status="waiting", stage="material", agent="协同调度器")
+    background_tasks.add_task(
+        _run_assessment,
+        assessment.id,
+        current_user.id,
+        job.job_title,
+        assessment.user_input,
+        [],
+        False,
+        True,
+    )
+    return {"assessment_id": assessment.id, "status": "queued"}
 
 
 @router.get("/{assessment_id}/calibration")

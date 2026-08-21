@@ -53,6 +53,21 @@ def calibrate_existing(
     )
 
 
+def auto_calibrate_existing(
+    user_id: str,
+    target_job: str,
+    diagnosis: dict,
+    user_input: str,
+) -> dict:
+    """Automatically calibrate a stored diagnosis from persisted evidence."""
+    return _runtime.auto_calibrate_existing(
+        user_id=user_id,
+        target_job=target_job,
+        diagnosis=diagnosis,
+        user_input=user_input,
+    )
+
+
 def generate_resource(
     knowledge_point: str,
     user_level: float,

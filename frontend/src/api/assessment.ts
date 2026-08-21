@@ -67,6 +67,9 @@ export interface CalibrationSummary {
   correction_applied?: boolean
   needs_human_review?: boolean
   unvalidated_reason?: string | null
+  mode?: 'automatic_evidence_review' | 'ground_truth' | string
+  metric_label?: string
+  is_ground_truth?: boolean
 }
 
 export interface AssessmentListItem {
@@ -111,6 +114,22 @@ export function calibrateAssessment(id: string, data: {
   apply_corrections?: boolean
 }): Promise<{ assessment_id: string; calibration: CalibrationSummary; records: Array<Record<string, unknown>>; diagnosis_updated: boolean }> {
   return request.post(`/assessment/${id}/calibrate`, data) as any
+}
+
+export function autoCalibrateAssessment(id: string): Promise<{
+  assessment_id: string
+  calibration: Record<string, any>
+  records: Record<string, any>[]
+  diagnosis_updated: boolean
+}> {
+  return request.post(`/assessment/${id}/auto-calibrate`) as any
+}
+
+export function repairLearningPackage(id: string): Promise<{
+  assessment_id: string
+  status: 'queued' | 'already_running'
+}> {
+  return request.post(`/assessment/${id}/repair-learning-package`) as any
 }
 
 /** 查询逐能力项校准记录 */

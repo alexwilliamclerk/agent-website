@@ -33,7 +33,7 @@
         <span class="eyebrow">LIBRARY TEMPORARILY UNAVAILABLE</span>
         <h2>{{ libraryError }}</h2>
         <p>已保留当前筛选条件。重新加载后，仅展示通过来源链审核的资源。</p>
-        <button class="primary-gradient-button state-button" type="button" @click="loadLibrary"><Refresh />重新加载</button>
+        <button class="primary-gradient-button state-button" type="button" @click="assessmentId ? retryPackageRepair() : loadLibrary()"><Refresh />{{ assessmentId ? '重新生成学习包' : '重新加载' }}</button>
       </section>
 
       <div v-else class="library-layout motion-enter motion-delay-1">
@@ -69,7 +69,7 @@
 
         <main class="library-content">
           <div class="library-tools">
-            <span class="library-result-count">{{ hasResources ? `${filteredResources.length} 项可用资源` : '等待本次诊断结果' }}</span>
+            <span class="library-result-count">{{ hasResources ? `${filteredResources.length} 项可用资源` : packageRepairing ? `正在自动重建学习包 · ${repairProgress.percent}%` : '等待本次诊断结果' }}</span>
           </div>
 
           <article class="learning-package glass-surface" :class="{ 'is-empty': !featuredResource }" :style="packSpotlight" @pointermove="updateSpotlight" @pointerleave="clearSpotlight">
@@ -83,10 +83,10 @@
                 <div class="package-actions"><button class="primary-gradient-button" type="button" @click="continueLearning">继续学习 <ArrowRight /></button><span>已编排 {{ filteredResources.length }} 项训练资源</span></div>
               </template>
               <template v-else>
-                <h2>{{ assessmentId ? '学习包正在等待审核通过的内容' : '完成诊断，生成你的 AI 学习包' }}</h2>
-                <p>{{ assessmentId ? '本次诊断已经建立，当前还没有可展示的正式资源。系统不会用无来源内容填充资料库。' : '诊断完成后，系统会围绕未达标项和证据不足项，生成讲义、实操任务、项目任务书与阶段复测。' }}</p>
+                <h2>{{ assessmentId ? packageRepairing ? '正在自动修复并生成个性化学习包' : '本次学习包需要重新生成' : '完成诊断，生成你的 AI 学习包' }}</h2>
+                <p>{{ assessmentId ? packageRepairing ? `${repairProgress.agent}：${repairProgress.label}。完成后本页会自动显示可学习正文与路径。` : '系统检测到这条历史诊断缺少可展示资源，将自动重新检索知识库、生成正文并完成来源审核。' : '诊断完成后，系统会围绕未达标项和证据不足项，生成讲义、实操任务、项目任务书与阶段复测。' }}</p>
                 <div class="package-tags preview-tags"><span>个性化讲义</span><span>实操任务</span><span>阶段复测</span></div>
-                <div class="package-actions"><button class="primary-gradient-button" type="button" @click="assessmentId ? loadLibrary() : router.push('/input')"><component :is="assessmentId ? Refresh : ArrowRight" />{{ assessmentId ? '重新读取' : '开始资料审查' }}</button><span>{{ assessmentId ? '等待来源校验与审核结果' : '约 3 个步骤完成能力诊断' }}</span></div>
+                <div class="package-actions"><button class="primary-gradient-button" type="button" :disabled="packageRepairing" @click="assessmentId ? retryPackageRepair() : router.push('/input')"><component :is="assessmentId ? packageRepairing ? Loading : Refresh : ArrowRight" />{{ assessmentId ? packageRepairing ? '自动生成中' : '自动重新生成' : '开始资料审查' }}</button><span>{{ assessmentId ? packageRepairing ? `${repairProgress.percent}% · 无需手动刷新` : '自动绑定本次诊断与知识库来源' : '约 3 个步骤完成能力诊断' }}</span></div>
               </template>
             </div>
             <div class="spatial-resource-object" aria-hidden="true">
@@ -104,7 +104,7 @@
             <ol>
               <li v-for="(step, index) in currentPath.steps.slice(0, 3)" :key="step.step" :class="{ current: step.status === 'current' || (!currentPath.current_step && index === 0), completed: step.status === 'completed' }">
                 <span>{{ String(index + 1).padStart(2, '0') }}</span>
-                <div><b>{{ step.knowledge_point }}</b><small>{{ step.resource_type }} · 约 {{ step.estimated_time }} 分钟</small></div>
+                <div><b>{{ safePathLabel(step.knowledge_point, index) }}</b><small>{{ step.resource_type }} · 约 {{ step.estimated_time }} 分钟</small></div>
               </li>
             </ol>
           </section>
@@ -139,7 +139,7 @@
             <template v-else><div class="overview-placeholder"><DataLine /><strong>学习概览将在诊断后生成</strong><p>资源数量、审核状态、主题覆盖与阶段进度都会在这里持续更新。</p></div></template>
           </section>
           <section class="collection-card glass-surface">
-            <div class="overview-title"><div><span>PIPELINE</span><h2>资源生成状态</h2></div><em>{{ hasResources ? '已完成' : '待启动' }}</em></div>
+            <div class="overview-title"><div><span>PIPELINE</span><h2>资源生成状态</h2></div><em>{{ hasResources ? '已完成' : packageRepairing ? `${repairProgress.percent}%` : '待启动' }}</em></div>
             <ol class="pipeline-list"><li v-for="(step, index) in pipelineSteps" :key="step.title" :class="stepState(index)"><span><CircleCheckFilled v-if="stepState(index) === 'done'" /><Loading v-else-if="stepState(index) === 'running'" /><Clock v-else /></span><div><b>{{ step.title }}</b><small>{{ step.description }}</small></div></li></ol>
           </section>
         </aside>
@@ -167,6 +167,7 @@ import { ArrowRight, CircleCheck, CircleCheckFilled, Clock, Collection, DataAnal
 import { bookmarkResource, getResourceBookmarks, getResourceList, unbookmarkResource, type ResourceInfo } from '@/api/resource'
 import { getLearningRecords, type LearningRecordInfo } from '@/api/record'
 import { getLearningPaths, type LearningPathInfo } from '@/api/path'
+import { getAssessmentProgress, repairLearningPackage, type AssessmentProgress } from '@/api/assessment'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -193,6 +194,11 @@ const learningRecords = ref<Record<string, LearningRecordInfo>>({})
 const currentPath = ref<LearningPathInfo | null>(null)
 const activeResourceId = ref('')
 let libraryLoadSequence = 0
+const packageRepairing = ref(false)
+const repairProgress = ref<AssessmentProgress>({ stage: 'material', agent: '协同调度器', label: '等待自动修复', percent: 0, status: 'waiting', updated_at: null, events: [] })
+const repairRequestedFor = new Set<string>()
+let repairTimer: number | null = null
+let repairPollCount = 0
 
 const demoResources: ResourceInfo[] = [
   { id: 'demo-java-core', assessment_id: 'demo-assessment', knowledge_point: 'Java 并发', content_type: '个性化讲义', title: 'Java 并发核心原理精讲', body: '从线程模型、锁语义与线程池参数入手，结合订单处理场景理解并发安全边界，并完成一组可验证的代码实验。', difficulty: 3, source_chunk_id: 'java_backend_0182', source_text: 'Java 并发与线程池领域知识片段', review_status: 'passed', review_reason: '知识点与来源片段一致，代码范围明确。', display_status: 'published', generation_method: 'rag_agent', created_at: '2026-08-16T10:00:00' },
@@ -252,7 +258,19 @@ function resourceProgress(resource: ResourceInfo, index: number) {
   if (!record) return 0
   return record.status === 'completed' ? 100 : record.status === 'in_progress' ? 50 : 0
 }
-function stepState(index: number) { if (hasResources.value) return 'done'; if (assessmentId.value) return index === 0 ? 'done' : index === 1 ? 'running' : 'waiting'; return 'waiting' }
+function stepState(index: number) {
+  if (hasResources.value) return 'done'
+  if (!packageRepairing.value) return 'waiting'
+  const thresholds = [50, 72, 92, 100]
+  if (repairProgress.value.percent >= thresholds[index]) return 'done'
+  const active = thresholds.findIndex(value => repairProgress.value.percent < value)
+  return active === index ? 'running' : 'waiting'
+}
+function safePathLabel(value: string, index: number) {
+  const cleaned = String(value || '').replace(/^[\s#>*\-\d.、()（）]+/, '').replace(/\s+/g, ' ').trim()
+  if (!cleaned || /构建失败|网络问题|后端问题|异常|error|failed/i.test(cleaned)) return ['岗位核心能力', '项目实战', '阶段复测'][index] || `能力补强 ${index + 1}`
+  return cleaned.slice(0, 32)
+}
 function openResource(resource: ResourceInfo, start = false) {
   if (resource.id.startsWith('demo-')) {
     selectedPreview.value = resource
@@ -297,6 +315,50 @@ function resetFilters() { keyword.value = ''; selectedTypes.value = []; selected
 function updateSpotlight(event: PointerEvent) { const target = event.currentTarget as HTMLElement; const rect = target.getBoundingClientRect(); spotlight.value = { x: (event.clientX - rect.left) / rect.width * 100, y: (event.clientY - rect.top) / rect.height * 100, active: true } }
 function clearSpotlight() { spotlight.value.active = false }
 function handleShortcut(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); nextTick(() => searchInput.value?.focus()) } }
+function stopRepairPolling() { if (repairTimer !== null) { window.clearInterval(repairTimer); repairTimer = null } }
+async function pollPackageRepair() {
+  if (!assessmentId.value || !packageRepairing.value) return
+  repairPollCount += 1
+  try {
+    const snapshot = await getAssessmentProgress(assessmentId.value)
+    repairProgress.value = snapshot
+    if (snapshot.status === 'failed') {
+      stopRepairPolling(); packageRepairing.value = false
+      libraryError.value = snapshot.label || '学习包自动修复失败'
+      return
+    }
+    if (snapshot.status === 'completed' || snapshot.percent >= 100) {
+      stopRepairPolling(); packageRepairing.value = false
+      await loadLibrary()
+      return
+    }
+  } catch { /* a later polling cycle retries */ }
+  if (repairPollCount >= 120) {
+    stopRepairPolling(); packageRepairing.value = false
+    libraryError.value = '学习包生成超时，请检查后端 Agent 与大模型配置'
+  }
+}
+async function startPackageRepair(force = false) {
+  const id = assessmentId.value
+  if (!id || packageRepairing.value) return
+  if (!force && repairRequestedFor.has(id)) return
+  repairRequestedFor.add(id); libraryError.value = ''; packageRepairing.value = true; repairPollCount = 0
+  repairProgress.value = { stage: 'material', agent: '协同调度器', label: '正在启动学习包自动修复', percent: 2, status: 'waiting', updated_at: null, events: [] }
+  try {
+    await repairLearningPackage(id)
+    stopRepairPolling()
+    await pollPackageRepair()
+    if (packageRepairing.value) repairTimer = window.setInterval(pollPackageRepair, 2500)
+  } catch (error: any) {
+    packageRepairing.value = false
+    libraryError.value = error?.response?.data?.detail || '无法启动学习包自动修复'
+  }
+}
+async function retryPackageRepair() {
+  if (!assessmentId.value) return
+  repairRequestedFor.delete(assessmentId.value)
+  await startPackageRepair(true)
+}
 async function loadLibrary() {
   const sequence = ++libraryLoadSequence
   libraryLoading.value = true; libraryError.value = ''; resources.value = []; currentPath.value = null; resetFilters()
@@ -335,6 +397,7 @@ async function loadLibrary() {
     bookmarkedIds.value = new Set(bookmarks.map(item => item.resource_id))
     learningRecords.value = Object.fromEntries(records.map(item => [item.resource_id, item]))
     currentPath.value = paths.find(path => path.assessment_id === assessmentId.value) || null
+    if (!resources.value.length) void startPackageRepair()
   } catch (error: any) {
     if (sequence === libraryLoadSequence) {
       libraryError.value = error?.response?.data?.detail || '资料库加载失败'
@@ -345,7 +408,7 @@ async function loadLibrary() {
 }
 watch(() => [route.query.assessment, route.query.demo, route.params.assessmentId], () => void loadLibrary(), { immediate: true })
 onMounted(() => { window.addEventListener('keydown', handleShortcut) })
-onBeforeUnmount(() => window.removeEventListener('keydown', handleShortcut))
+onBeforeUnmount(() => { stopRepairPolling(); window.removeEventListener('keydown', handleShortcut) })
 </script>
 
 <style scoped>

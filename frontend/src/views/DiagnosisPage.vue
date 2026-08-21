@@ -3,7 +3,7 @@
     <div class="content-width">
       <header class="diagnosis-heading motion-enter">
         <div><span class="eyebrow">DIAGNOSTIC CORE</span><h1 class="page-title">能力诊断 <MagicStick /></h1><p class="page-subtitle">基于岗位能力模型与可追溯证据，形成多维能力判断、真实结果校准和下一阶段学习建议。</p></div>
-        <div class="heading-actions"><button type="button" class="top-action" :disabled="loading || running" @click="loadAssessment"><Refresh /> 重新读取</button><button type="button" class="top-action primary" :disabled="demoMode || !assessment || !requirementItems.length" @click="showCalibration = !showCalibration"><Aim /> {{ showCalibration ? '收起校准' : '校准准确率' }}</button></div>
+        <div class="heading-actions"><button type="button" class="top-action" :disabled="loading || running" @click="loadAssessment"><Refresh /> 重新读取</button><button type="button" class="top-action primary" :disabled="demoMode || !assessment || assessment.overall_mastery === null || calibrationSubmitting" @click="runAutomaticCalibration"><Loading v-if="calibrationSubmitting" /><Aim v-else /> {{ calibrationSubmitting ? '自动校准中' : '自动校准准确率' }}</button></div>
       </header>
 
       <section v-if="loading || running" class="diagnosis-loading glass-surface">
@@ -23,8 +23,6 @@
       </section>
 
       <template v-else>
-        <section v-if="showCalibration" class="calibration-panel glass-surface motion-enter"><div><span class="glass-pill">真实结果校准</span><h2>录入客观题、实操或专家标注结果</h2><p>系统仅在收到可追溯的真实结果后计算准确率；未校准不等于准确率低。</p></div><div class="calibration-fields"><label v-for="item in requirementItems" :key="item.requirement_id"><span>{{ item.requirement_name }}</span><input v-model.number="goldScores[item.requirement_id]" type="number" min="0" max="100" placeholder="0–100" /></label></div><div class="calibration-actions"><label class="correction-check"><input v-model="applyCorrections" type="checkbox" /> 将可信结果用于校正本次诊断</label><button type="button" :disabled="calibrationSubmitting" @click="submitCalibration">{{ calibrationSubmitting ? '校准中…' : '提交真实结果' }}</button></div></section>
-
         <section class="core-grid motion-enter motion-delay-1">
           <article class="match-card glass-surface">
             <div class="card-heading"><span class="card-eyebrow">总体匹配度</span><Briefcase /></div>
@@ -57,7 +55,7 @@
             </div>
           </article>
 
-          <article class="agent-summary diagnostic-agent-summary glass-surface"><span class="agent-face"><Cpu /></span><h2>Agent 综合结论</h2><p>{{ agentSummary }}</p><div class="review-metric"><span>真实结果<br />准确率</span><b :class="accuracyClass">{{ calibrationText }}</b></div><button type="button" @click="openLibrary">查看推荐学习资料 <ArrowRight /></button></article>
+          <article class="agent-summary diagnostic-agent-summary glass-surface"><span class="agent-face"><Cpu /></span><h2>Agent 综合结论</h2><p>{{ agentSummary }}</p><div class="review-metric"><span>{{ calibrationMetricLabel }}</span><b :class="accuracyClass">{{ calibrationText }}</b></div><button type="button" @click="openLibrary">查看推荐学习资料 <ArrowRight /></button></article>
         </section>
 
         <section class="analysis-grid motion-enter motion-delay-2">
@@ -86,7 +84,7 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { calibrateAssessment, getAssessment, getAssessmentAgents, getAssessmentProgress, streamAssessmentProgress, type AssessmentProgress, type AssessmentResponse, type RequirementScore } from '@/api/assessment'
+import { autoCalibrateAssessment, getAssessment, getAssessmentAgents, getAssessmentProgress, streamAssessmentProgress, type AssessmentProgress, type AssessmentResponse } from '@/api/assessment'
 import { getLearningPaths, type LearningPathInfo } from '@/api/path'
 import { getResourceList, type ResourceInfo } from '@/api/resource'
 import { getJobList } from '@/api/jobs'
@@ -100,14 +98,15 @@ const assessment = ref<AssessmentResponse | null>(null); const loading = ref(fal
 const radarRef = ref<HTMLDivElement | null>(null); const scoreRef = ref<HTMLDivElement | null>(null); let chart: echarts.ECharts | null = null; let scoreChart: echarts.ECharts | null = null; let progressTimer: number | null = null; let progressStreamController: AbortController | null = null; let finishing = false
 let assessmentLoadSequence = 0
 const currentPath = ref<LearningPathInfo | null>(null); const pathLoading = ref(false); const resources = ref<ResourceInfo[]>([]); const traceSourceCount = ref(0)
-const showCalibration = ref(false); const calibrationSubmitting = ref(false); const applyCorrections = ref(false); const goldScores = ref<Record<string, number | null>>({})
+const calibrationSubmitting = ref(false)
 const jobTitle = ref('目标岗位能力模型')
 const assessmentId = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
 const overallPercent = computed(() => Math.round((assessment.value?.overall_mastery || 0) * 100)); const confidencePercent = computed(() => Math.round((assessment.value?.confidence || 0) * 100)); const formattedDate = computed(() => assessment.value ? new Date(assessment.value.created_at).toLocaleDateString('zh-CN') : '—')
-const strengths = computed(() => [...(assessment.value?.ability_vector || [])].sort((a,b) => b.value - a.value).slice(0, 3)); const gaps = computed(() => assessment.value?.knowledge_gaps || []); const requirementItems = computed<RequirementScore[]>(() => assessment.value?.requirement_scores || [])
+const strengths = computed(() => [...(assessment.value?.ability_vector || [])].sort((a,b) => b.value - a.value).slice(0, 3)); const gaps = computed(() => assessment.value?.knowledge_gaps || [])
 const levelClass = computed(() => overallPercent.value >= 80 ? 'good' : overallPercent.value >= 60 ? 'partial' : 'needs'); const levelText = computed(() => overallPercent.value >= 80 ? '良好匹配' : overallPercent.value >= 60 ? '部分匹配' : '优先补强')
-const calibration = computed(() => assessment.value?.calibration_summary); const calibrationText = computed(() => calibration.value?.accuracy === null || calibration.value?.accuracy === undefined ? '待校准' : `${Math.round(calibration.value.accuracy * 100)}%`); const accuracyClass = computed(() => calibration.value?.accuracy && calibration.value.accuracy >= .9 ? 'accurate' : 'pending')
-const calibrationStatusText = computed(() => assessment.value?.calibration_status === 'passed' ? '已通过' : assessment.value?.calibration_status === 'needs_review' ? '需要复核' : '未校准')
+const calibration = computed(() => assessment.value?.calibration_summary); const calibrationText = computed(() => calibration.value?.accuracy === null || calibration.value?.accuracy === undefined ? '待校准' : `${Math.round(calibration.value.accuracy * 100)}%`); const accuracyClass = computed(() => typeof calibration.value?.accuracy === 'number' && calibration.value.accuracy >= .9 ? 'accurate' : 'pending')
+const calibrationMetricLabel = computed(() => calibration.value?.mode === 'automatic_evidence_review' ? '自动证据校准准确率' : '真实结果准确率')
+const calibrationStatusText = computed(() => calibration.value?.mode === 'automatic_evidence_review' ? '自动证据复核完成' : assessment.value?.calibration_status === 'passed' ? '已通过' : assessment.value?.calibration_status === 'needs_review' ? '需要复核' : '未校准')
 const resourceQualityText = computed(() => !resources.value.length ? '暂无可展示资源' : `${resources.value.filter(item => item.review_status === 'passed').length}/${resources.value.length} 已通过来源校验`)
 const traceLabel = computed(() => traceSourceCount.value ? `${traceSourceCount.value} 条依据` : '证据待加载')
 const agentSummary = computed(() => { const high = strengths.value.slice(0,2).map(item => item.name).join('、'); const low = [...(assessment.value?.ability_vector || [])].sort((a,b) => a.value - b.value)[0]?.name; if (!high && !low) return '本次诊断尚未形成完整的能力结论。'; return `你已具备较稳定的岗位基础，当前优势集中在${high || '已提交证据覆盖的能力'}。影响下一阶段竞争力的主要因素不是学习资源数量，而是${low || '复杂任务经验'}仍需补强。建议围绕能力缺口完成一次可验证的项目实践，并在复测后更新路径。` })
@@ -235,7 +234,7 @@ async function loadTrace() { if (!assessment.value) return; try { const response
 function renderScore() {
   if (!scoreRef.value) return
   scoreChart?.dispose()
-  scoreChart = echarts.init(scoreRef.value)
+  scoreChart = echarts.init(scoreRef.value, undefined, { renderer: 'svg' })
   const progressColor = new echarts.graphic.LinearGradient(0, 1, 1, 0, [
     { offset: 0, color: '#05834a' },
     { offset: .58, color: '#18b86b' },
@@ -269,7 +268,7 @@ function renderRadar() {
   const dims = assessment.value?.ability_vector || []
   if (!radarRef.value || !dims.length) return
   chart?.dispose()
-  chart = echarts.init(radarRef.value)
+  chart = echarts.init(radarRef.value, undefined, { renderer: 'svg' })
   chart.setOption({
     animationDuration: 900,
     animationEasing: 'cubicOut',
@@ -303,10 +302,23 @@ function renderRadar() {
     ],
   })
 }
-function renderVisuals() { renderScore(); renderRadar() }
-async function submitCalibration() { if (!assessment.value || demoMode.value) return; const labels = requirementItems.value.map(item => ({ requirement_id: item.requirement_id, gold_score: goldScores.value[item.requirement_id], source_type: 'expert', trusted: true })).filter(item => typeof item.gold_score === 'number' && Number.isFinite(item.gold_score)); if (!labels.length) { ElMessage.warning('至少录入一项真实结果分数'); return }; calibrationSubmitting.value = true; try { await calibrateAssessment(assessment.value.id, { gold_labels: labels, apply_corrections: applyCorrections.value }); ElMessage.success('真实结果校准完成'); await loadAssessment(); showCalibration.value = false } catch (error: any) { ElMessage.error(error?.response?.data?.detail || '校准失败') } finally { calibrationSubmitting.value = false } }
+function renderVisuals() { renderScore(); renderRadar(); requestAnimationFrame(() => { chart?.resize(); scoreChart?.resize() }) }
+async function runAutomaticCalibration() {
+  if (!assessment.value || demoMode.value || calibrationSubmitting.value) return
+  calibrationSubmitting.value = true
+  try {
+    const response = await autoCalibrateAssessment(assessment.value.id)
+    const accuracy = response.calibration?.accuracy
+    ElMessage.success(typeof accuracy === 'number' ? `自动校准完成：${Math.round(accuracy * 100)}%` : '自动校准完成')
+    await loadAssessment()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '自动校准失败')
+  } finally { calibrationSubmitting.value = false }
+}
 function handleResize() { chart?.resize(); scoreChart?.resize() }
-watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scoreChart?.dispose(); chart = null; scoreChart = null; loadAssessment() }, { immediate: true }); window.addEventListener('resize', handleResize); onBeforeUnmount(() => { stopProgressUpdates(); chart?.dispose(); scoreChart?.dispose(); window.removeEventListener('resize', handleResize) })
+const chartResizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => handleResize())
+watch(radarRef, (element, previous) => { if (previous) chartResizeObserver?.unobserve(previous); if (element) chartResizeObserver?.observe(element) })
+watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scoreChart?.dispose(); chart = null; scoreChart = null; loadAssessment() }, { immediate: true }); window.addEventListener('resize', handleResize); onBeforeUnmount(() => { stopProgressUpdates(); chartResizeObserver?.disconnect(); chart?.dispose(); scoreChart?.dispose(); window.removeEventListener('resize', handleResize) })
 </script>
 
 <style scoped>
@@ -360,16 +372,6 @@ watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scor
 .empty-process b { font-size: 11px; }
 .empty-process small { color: var(--ink-faint); font-size: 9px; }
 
-.calibration-panel { border-radius: var(--radius-lg); padding: 21px; margin-bottom: 18px; display: grid; grid-template-columns: .8fr 1.6fr; gap: 21px; align-items: start; }
-.calibration-panel h2 { font-size: 18px; margin: 12px 0 7px; }
-.calibration-panel p { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.65; }
-.calibration-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
-.calibration-fields label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--ink-soft); }
-.calibration-fields input { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.65); outline: none; color: var(--ink); }
-.calibration-actions { grid-column: 2; display: flex; justify-content: space-between; align-items: center; }
-.calibration-actions button { border: 0; border-radius: 10px; padding: 10px 13px; background: var(--gradient-primary); color: #fff; cursor: pointer; font-size: 12px; }
-.calibration-actions button:disabled { opacity: .5; }
-.correction-check { font-size: 11px; color: var(--ink-soft); }
 
 .core-grid {
   display: grid;
@@ -520,7 +522,7 @@ watch(() => [assessmentId.value, demoMode.value], () => { chart?.dispose(); scor
   .core-grid { grid-template-columns: minmax(240px, 280px) minmax(560px, 1fr) minmax(240px, 280px); }
 }
 @media (max-width: 1260px) { .core-grid { grid-template-columns: minmax(220px, .72fr) minmax(520px, 1.3fr); } .dimension-card { grid-column: 1/3; min-height: auto; } .dimension-list { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; } .analysis-grid { grid-template-columns: 1fr 1fr; } .roadmap-card { grid-column: 1/3; } .empty-visual-grid { grid-template-columns: .7fr 1.4fr; } .empty-dimension-preview { grid-column: 1/3; min-height: auto; display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; } .empty-dimension-preview > .empty-label { grid-column: 1/6; } .empty-dimension-preview > div { grid-template-columns: 1fr; } }
-@media (max-width: 720px) { .diagnosis-heading { display: block; } .heading-actions { margin-top: 15px; } .diagnosis-error { display: block; } .diagnosis-error button { margin: 14px 0 0; } .empty-diagnostic { padding: 14px; } .empty-visual-grid { grid-template-columns: 1fr; } .empty-match-preview { display: none; } .empty-core-stage { min-height: 400px; } .empty-dimension-preview { grid-column: auto; display: block; } .empty-process { grid-template-columns: 1fr 1fr; gap: 15px 0; } .empty-process > div:nth-child(2) { border-right: 0; } .core-grid { grid-template-columns: 1fr; } .diagnostic-core { order: -1; min-height: 510px; } .dimension-card { grid-column: auto; } .core-glass { width: 94%; } .core-body { grid-template-columns: 1fr; height: auto; } .core-topline { display: none; } .score-dial { margin: 13px auto 0; } .radar-chart { height: 220px; } .core-meta { flex-wrap: wrap; } .dimension-list { grid-template-columns: 1fr; } .analysis-grid { grid-template-columns: 1fr; } .roadmap-card { grid-column: auto; } .evidence-insights { grid-template-columns: 1fr; } .evidence-insights > section { padding: 0; } .evidence-insights > section + section { margin-top: 20px; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); } .quality-strip { grid-template-columns: 1fr 1fr; } .quality-strip > div { border: 0; } .calibration-panel { grid-template-columns: 1fr; } .calibration-fields { grid-template-columns: 1fr 1fr; } .calibration-actions { grid-column: auto; display: block; } .calibration-actions button { margin-top: 12px; } .match-card { min-height: 290px; } }
+@media (max-width: 720px) { .diagnosis-heading { display: block; } .heading-actions { margin-top: 15px; } .diagnosis-error { display: block; } .diagnosis-error button { margin: 14px 0 0; } .empty-diagnostic { padding: 14px; } .empty-visual-grid { grid-template-columns: 1fr; } .empty-match-preview { display: none; } .empty-core-stage { min-height: 400px; } .empty-dimension-preview { grid-column: auto; display: block; } .empty-process { grid-template-columns: 1fr 1fr; gap: 15px 0; } .empty-process > div:nth-child(2) { border-right: 0; } .core-grid { grid-template-columns: 1fr; } .diagnostic-core { order: -1; min-height: 510px; } .dimension-card { grid-column: auto; } .core-glass { width: 94%; } .core-body { grid-template-columns: 1fr; height: auto; } .core-topline { display: none; } .score-dial { margin: 13px auto 0; } .radar-chart { height: 220px; } .core-meta { flex-wrap: wrap; } .dimension-list { grid-template-columns: 1fr; } .analysis-grid { grid-template-columns: 1fr; } .roadmap-card { grid-column: auto; } .evidence-insights { grid-template-columns: 1fr; } .evidence-insights > section { padding: 0; } .evidence-insights > section + section { margin-top: 20px; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); } .quality-strip { grid-template-columns: 1fr 1fr; } .quality-strip > div { border: 0; } .match-card { min-height: 290px; } }
 /* Diagnostic Console V4: clean liquid glass with restrained environmental light. */
 .diagnostic-core {
   --spot-opacity: .26;

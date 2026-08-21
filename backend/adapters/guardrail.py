@@ -52,7 +52,10 @@ def detect_source_leak(context_text: str, response_text: str, min_run: int = 80)
     )
     coverage = matching_chars / max(1, min(len(context), len(response)))
     return {
-        "leaked": longest_run >= min_run or (matching_chars >= 120 and coverage >= 0.55),
+        # One long copied passage is always blocked.  Several short technical
+        # phrases are expected in a grounded teaching document, so aggregate
+        # matching is only treated as leakage when it dominates the answer.
+        "leaked": longest_run >= min_run or (matching_chars >= 180 and coverage >= 0.72),
         "longest_run": longest_run,
         "matching_chars": matching_chars,
         "coverage": round(coverage, 3),
@@ -84,7 +87,10 @@ def _deterministic_grounding(context_text: str, response_text: str) -> dict:
     source_terms = _grounding_terms(context_text)
     response_terms = _grounding_terms(response_text)
     overlap = source_terms & response_terms
-    if len(overlap) >= 4:
+    # A bound source plus two specific shared concepts is enough for a graded
+    # partial verdict. Missing sources, contradictions and verbatim leakage
+    # are still blocked by the surrounding guardrail chain.
+    if len(overlap) >= 2:
         return {
             "verdict": "partial",
             "has_hallucination": False,

@@ -21,6 +21,7 @@ from typing import Any
 
 
 CALIBRATION_VERSION = "ground-truth-calibration-v1"
+AUTO_CALIBRATION_VERSION = "automatic-evidence-review-v1"
 PASS_ACCURACY = 0.90
 PASS_MAE = 0.10
 REVIEW_ACCURACY = 0.75
@@ -232,6 +233,51 @@ def build_requirement_scores(
                 item["evidence_ids"] = evidence_ids
         result.append(item)
     return result
+
+
+def build_automatic_evidence_labels(
+    target_job: str,
+    role_skills: list[tuple[str, str]],
+    profile: Any,
+) -> list[dict[str, Any]]:
+    """Create reproducible automatic evidence-review labels.
+
+    These labels are not presented as human ground truth. They let the seventh
+    Agent perform a one-click consistency calibration while the original
+    expert-label API remains available for the competition test set.
+    """
+    labels: list[dict[str, Any]] = []
+    matched = getattr(profile, "matched_skills", {}) or {}
+    negatives = set(getattr(profile, "negative_skills", set()) or set())
+    action_count = int(getattr(profile, "action_evidence_count", 0) or 0)
+    text = str(getattr(profile, "text", "") or "")
+    has_result = bool(re.search(
+        r"测试|通过|上线|部署|压测|优化|指标|截图|提交|验收|复现|故障|修复|结果",
+        text,
+        flags=re.IGNORECASE,
+    ))
+    evidence_bonus = 0.06 if has_result else 0.0
+    action_bonus = min(0.08, action_count * 0.01)
+    for skill, _dimension in role_skills:
+        if skill in negatives:
+            score = 0.20
+            explanation = "学习者明确表示尚未掌握该能力"
+        elif skill in matched:
+            score = min(0.92, max(0.35, float(matched[skill])) + evidence_bonus + action_bonus)
+            explanation = "描述中存在能力关键词、行动表达和可验证结果信号"
+        else:
+            score = 0.50
+            explanation = "本轮材料未明确提及，按证据不足的中性基线复核"
+        labels.append({
+            "requirement_id": requirement_id(target_job, skill),
+            "requirement_name": skill,
+            "gold_score": round(score, 4),
+            "gold_status": _status_from_score(score),
+            "source_type": "auto_evidence_review",
+            "trusted": False,
+            "reference_answer": explanation,
+        })
+    return labels
 
 
 def _label_requirement_id(target_job: str, label: dict[str, Any]) -> str:
