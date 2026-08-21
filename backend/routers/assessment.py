@@ -436,15 +436,16 @@ def _run_assessment(
             current_ability=raw_vector,
         )
         _set_progress(assessment_id, "路径规划 Agent 已生成学习顺序", 54, stage="path", agent="路径规划 Agent")
-        if path_steps:
-            db.add(LearningPath(
-                user_id=user_id,
-                job_id=assessment.job_id,
-                assessment_id=assessment.id,
-                steps=path_steps,
-                current_step=1,
-                status="active",
-            ))
+        if not path_steps:
+            raise RuntimeError("路径规划 Agent 未生成有效学习步骤")
+        db.add(LearningPath(
+            user_id=user_id,
+            job_id=assessment.job_id,
+            assessment_id=assessment.id,
+            steps=path_steps,
+            current_step=1,
+            status="active",
+        ))
 
         # ④ 资源生成 Agent：每个资源生成前、后都发出进度事件。
         seen_points = set()
@@ -618,11 +619,22 @@ def _run_assessment(
         # ⑥ 审核纠偏 Agent：正式资源在完成来源绑定和幻觉校验后才可展示。
         _set_progress(assessment_id, "审核纠偏 Agent 正在校验来源与生成内容", 92, stage="review", agent="审核纠偏 Agent")
         review_results = agent_adapter.review_resources(f"pkg_{assessment.id}", generated_resources)
+        visible_review_count = 0
         for result in review_results:
             resource = resource_by_id.get(result.get("resource_id"))
             if resource:
                 resource.review_status = result.get("status")
                 resource.review_reason = result.get("reason")
+                if (
+                    resource.review_status in {"passed", "partial"}
+                    and str(resource.source_chunk_id or "").strip()
+                    and str(resource.source_text or "").strip()
+                ):
+                    visible_review_count += 1
+        if not generated_resources:
+            raise RuntimeError("资源生成 Agent 未生成学习资料")
+        if visible_review_count == 0:
+            raise RuntimeError("审核纠偏 Agent 未产生可展示的来源绑定资料")
         _set_progress(assessment_id, "审核纠偏 Agent 已完成来源校验", 98, stage="review", agent="审核纠偏 Agent")
 
         # ⑦ 持久化并关闭任务。新诊断只有在资源与审核全部成功后才

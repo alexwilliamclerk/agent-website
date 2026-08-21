@@ -13,6 +13,8 @@ import main
 from database import SessionLocal
 from models.assessment import Assessment
 from models.job import Job
+from models.path import LearningPath
+from models.resource import Resource
 from models.session import Session, SessionMessage
 from models.user import User
 from routers import assessment as assessment_router
@@ -149,6 +151,87 @@ class WorkflowIntegrityTests(unittest.TestCase):
         db = SessionLocal()
         persisted = db.query(Assessment).filter(Assessment.id == assessment_id).first()
         self.assertIsNone(persisted.overall_mastery)
+        retriable_session = db.query(Session).filter(Session.id == session_id).first()
+        self.assertIsNone(retriable_session.assessment_id)
+        self.assertEqual(retriable_session.status, "ready_for_diagnosis")
+        db.close()
+
+    def test_unbound_resources_do_not_publish_false_success(self):
+        db = SessionLocal()
+        assessment = Assessment(user_id=self.user_id, job_id=self._job_id(), user_input="server context")
+        db.add(assessment)
+        db.flush()
+        session = Session(
+            user_id=self.user_id,
+            job_id=assessment.job_id,
+            status="completed",
+            turn_count=2,
+            minimum_turns=2,
+            ready_for_diagnosis=1,
+            assessment_id=assessment.id,
+        )
+        db.add(session)
+        db.commit()
+        assessment_id = assessment.id
+        session_id = session.id
+        db.close()
+
+        diagnosis = {
+            "overall_mastery": 0.5,
+            "ability_vector": [{"index": 1, "name": "工程能力", "value": 0.5, "weight": "high", "category": "工程"}],
+            "ability_matrix": [],
+            "knowledge_gaps": ["工程能力"],
+            "gap_validation": [],
+            "confidence": 0.7,
+            "requirement_scores": [],
+            "calibration": {"status": "unvalidated", "evaluated_count": 0, "accuracy": None},
+            "calibration_records": [],
+        }
+        path_steps = [{
+            "step": 1,
+            "knowledge_point": "Vue",
+            "resource_type": "讲义",
+            "estimated_time": 30,
+            "status": "current",
+            "weight": "high",
+        }]
+        generated = {
+            "content_type": "讲义",
+            "title": "Vue 能力补强讲义",
+            "body": "围绕组件状态、事件处理和接口联调设计的可验证学习内容。",
+            "difficulty": 2,
+            "source_chunk_id": "",
+            "source_text": "",
+            "source_title": "Vue 工程实践",
+            "source_score": 0.9,
+            "generation_method": "rules",
+        }
+
+        def approve_unbound(_package_id, resources):
+            return [
+                {"resource_id": item["resource_id"], "status": "passed", "reason": "测试误放行"}
+                for item in resources
+            ]
+
+        with patch.object(assessment_router.agent_adapter, "diagnose", return_value=diagnosis), \
+             patch.object(assessment_router.agent_adapter, "get_last_trace", return_value={"agents": []}), \
+             patch.object(assessment_router.agent_adapter, "plan_learning_path", return_value=path_steps), \
+             patch.object(assessment_router.agent_adapter, "generate_resource", return_value=generated), \
+             patch.object(assessment_router.agent_adapter, "review_resources", side_effect=approve_unbound):
+            assessment_router._run_assessment(
+                assessment_id,
+                self.user_id,
+                "前端开发工程师",
+                "server context",
+                [],
+                False,
+            )
+
+        db = SessionLocal()
+        persisted = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+        self.assertIsNone(persisted.overall_mastery)
+        self.assertEqual(db.query(Resource).filter(Resource.assessment_id == assessment_id).count(), 0)
+        self.assertEqual(db.query(LearningPath).filter(LearningPath.assessment_id == assessment_id).count(), 0)
         retriable_session = db.query(Session).filter(Session.id == session_id).first()
         self.assertIsNone(retriable_session.assessment_id)
         self.assertEqual(retriable_session.status, "ready_for_diagnosis")

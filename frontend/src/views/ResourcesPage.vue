@@ -329,7 +329,10 @@ async function pollPackageRepair() {
     }
     if (snapshot.status === 'completed' || snapshot.percent >= 100) {
       stopRepairPolling(); packageRepairing.value = false
-      await loadLibrary()
+      await loadLibrary(false)
+      if (!resources.value.length) {
+        libraryError.value = '重建任务已结束，但没有产生通过来源审核的学习资料。请重试；若仍失败，请检查知识库检索与审核日志。'
+      }
       return
     }
   } catch { /* a later polling cycle retries */ }
@@ -359,7 +362,7 @@ async function retryPackageRepair() {
   repairRequestedFor.delete(assessmentId.value)
   await startPackageRepair(true)
 }
-async function loadLibrary() {
+async function loadLibrary(autoRepair = true) {
   const sequence = ++libraryLoadSequence
   libraryLoading.value = true; libraryError.value = ''; resources.value = []; currentPath.value = null; resetFilters()
   try {
@@ -397,7 +400,7 @@ async function loadLibrary() {
     bookmarkedIds.value = new Set(bookmarks.map(item => item.resource_id))
     learningRecords.value = Object.fromEntries(records.map(item => [item.resource_id, item]))
     currentPath.value = paths.find(path => path.assessment_id === assessmentId.value) || null
-    if (!resources.value.length) void startPackageRepair()
+    if (!resources.value.length && autoRepair) void startPackageRepair()
   } catch (error: any) {
     if (sequence === libraryLoadSequence) {
       libraryError.value = error?.response?.data?.detail || '资料库加载失败'
@@ -406,7 +409,7 @@ async function loadLibrary() {
   }
   finally { if (sequence === libraryLoadSequence) libraryLoading.value = false }
 }
-watch(() => [route.query.assessment, route.query.demo, route.params.assessmentId], () => void loadLibrary(), { immediate: true })
+watch(() => [route.query.assessment, route.query.demo, route.params.assessmentId], () => void loadLibrary(true), { immediate: true })
 onMounted(() => { window.addEventListener('keydown', handleShortcut) })
 onBeforeUnmount(() => { stopRepairPolling(); window.removeEventListener('keydown', handleShortcut) })
 </script>

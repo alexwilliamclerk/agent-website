@@ -9,7 +9,9 @@ export interface ResourceInfo {
   body: string
   difficulty: number | null
   source_chunk_id: string | null
-  source_text: string | null
+  // Raw knowledge chunks stay server-side in production responses. Demo
+  // fixtures may include this field for the local preview.
+  source_text?: string | null
   review_status: string | null
   review_reason: string | null
   display_status: string

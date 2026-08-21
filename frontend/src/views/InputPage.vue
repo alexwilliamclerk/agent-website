@@ -125,7 +125,7 @@ import {
 import { ElMessage } from 'element-plus'
 import { getJobList, type JobInfo } from '@/api/jobs'
 import { previewJobs } from '@/fixtures/previewJobs'
-import { createAssessment, submitAssessment, type AssessmentProgress } from '@/api/assessment'
+import { createAssessment, deleteAssessment, submitAssessment, type AssessmentProgress } from '@/api/assessment'
 import { createSession, getReviewSession, getSessionMessages, submitReviewTurn, type ReviewMessage } from '@/api/session'
 import { useUserStore } from '@/stores/user'
 
@@ -291,10 +291,17 @@ async function launchFormalDiagnosis() {
   diagnosisLaunchError.value = ''
   liveProgress.value = { stage: 'material', agent: '资料解析 Agent', label: '多轮资料审查完成，正在创建正式诊断任务', percent: 8, status: 'running', updated_at: null, events: [] }
   const assessment = await createAssessment({ job_id: selectedJobId.value })
-  await submitAssessment(assessment.id, {
-    user_input: '多轮资料审查会话已提供能力证据。',
-    session_id: reviewSessionId.value,
-  })
+  try {
+    await submitAssessment(assessment.id, {
+      user_input: '多轮资料审查会话已提供能力证据。',
+      session_id: reviewSessionId.value,
+    })
+  } catch (error) {
+    // Creating and submitting are separate requests. Remove an empty task
+    // when submission is rejected so retries do not pollute diagnosis history.
+    await deleteAssessment(assessment.id).catch(() => undefined)
+    throw error
+  }
   // Submission only queues the long-running Agent workflow. Navigate at once:
   // DiagnosisPage owns SSE + polling and renders the real execution progress.
   await router.push(`/diagnosis/${assessment.id}`)
